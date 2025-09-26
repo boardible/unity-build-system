@@ -1,0 +1,5 @@
+# Local development environment files
+.env*.local
+.env
+*.log
+*.tmp
