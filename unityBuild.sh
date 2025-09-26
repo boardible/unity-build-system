@@ -14,6 +14,16 @@ if [ -f "$PROJECT_PATH/project-config.sh" ]; then
     source "$PROJECT_PATH/project-config.sh"
 fi
 
+# Load local environment variables if they exist
+if [ -f "$SCRIPT_DIR/.env.ios.local" ]; then
+    source "$SCRIPT_DIR/.env.ios.local"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Loaded iOS environment variables"
+fi
+if [ -f "$SCRIPT_DIR/.env.android.local" ]; then
+    source "$SCRIPT_DIR/.env.android.local"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Loaded Android environment variables"
+fi
+
 # Set defaults if not configured
 export PROJECT_NAME="${PROJECT_NAME:-UnityProject}"
 export UNITY_VERSION="${UNITY_VERSION:-6000.0.58f1}"
@@ -63,23 +73,38 @@ build_unity() {
     local platform=$1
     local build_target=$2
     local output_path=$3
-    local additional_args=$4
+    local profile=$4
+    local additional_args=$5
     
-    log "Building Unity project for $platform..."
+    log "Building Unity project for $platform using $profile profile..."
     
     # Create build directory
     mkdir -p "$output_path"
     mkdir -p "$LOGS_PATH"
     
-    # Unity build command
+    # Unity build command (without -quit to allow async operations)
     local unity_cmd="$UNITY_PATH"
     unity_cmd+=" -batchmode"
-    unity_cmd+=" -quit"
+    unity_cmd+=" -nographics"
     unity_cmd+=" -projectPath $PROJECT_PATH"
     unity_cmd+=" -buildTarget $build_target"
     unity_cmd+=" -buildPath $output_path"
-    unity_cmd+=" -executeMethod BuildScript.Build$platform"
-    unity_cmd+=" -logFile $LOGS_PATH/unity-build-$platform-$(date +%Y%m%d-%H%M%S).log"
+    # Handle case sensitivity for method names
+    local method_name
+    case $platform in
+        iOS)
+            method_name="BuildiOS"
+            ;;
+        Android)
+            method_name="BuildAndroid"
+            ;;
+        *)
+            method_name="Build$platform"
+            ;;
+    esac
+    unity_cmd+=" -executeMethod BuildScript.$method_name"
+    unity_cmd+=" -profile $profile"
+    unity_cmd+=" -stackTraceLogType None"
     
     if [ -n "$additional_args" ]; then
         unity_cmd+=" $additional_args"
@@ -88,9 +113,9 @@ build_unity() {
     log "Executing Unity build command..."
     log "Command: $unity_cmd"
     
-    # Execute Unity build
-    eval "$unity_cmd"
-    local exit_code=$?
+    # Execute Unity build with real-time output
+    eval "$unity_cmd" 2>&1 | tee "$LOGS_PATH/unity-build-$platform-$(date +%Y%m%d-%H%M%S).log"
+    local exit_code=${PIPESTATUS[0]}
     
     if [ $exit_code -eq 0 ]; then
         log "Unity build for $platform completed successfully"
@@ -109,15 +134,16 @@ build_addressables() {
     
     local unity_cmd="$UNITY_PATH"
     unity_cmd+=" -batchmode"
-    unity_cmd+=" -quit"
+    unity_cmd+=" -nographics"
     unity_cmd+=" -projectPath $PROJECT_PATH"
     unity_cmd+=" -executeMethod BuildScript.BuildAddressables"
     unity_cmd+=" -buildTarget $platform"
-    unity_cmd+=" -logFile $LOGS_PATH/addressables-build-$platform-$(date +%Y%m%d-%H%M%S).log"
+    unity_cmd+=" -logFile /dev/null"
+    unity_cmd+=" -stackTraceLogType None"
     
     log "Building Addressables..."
-    eval "$unity_cmd"
-    local exit_code=$?
+    eval "$unity_cmd" 2>&1 | tee "$LOGS_PATH/addressables-build-$platform-$(date +%Y%m%d-%H%M%S).log"
+    local exit_code=${PIPESTATUS[0]}
     
     if [ $exit_code -eq 0 ]; then
         log "Addressables build for $platform completed successfully"
@@ -134,20 +160,20 @@ run_board_doctor() {
     # Create logs directory
     mkdir -p "$LOGS_PATH"
     
-    # Unity command to run BoardDoctor
+    # Unity command to run BoardDoctor (without -quit to allow async operations)
     local unity_cmd="$UNITY_PATH"
     unity_cmd+=" -batchmode"
-    unity_cmd+=" -quit"
+    unity_cmd+=" -nographics"
     unity_cmd+=" -projectPath $PROJECT_PATH"
     unity_cmd+=" -executeMethod BuildScript.RunBoardDoctor"
-    unity_cmd+=" -logFile $LOGS_PATH/unity-boarddoctor-$(date +%Y%m%d-%H%M%S).log"
+    unity_cmd+=" -stackTraceLogType None"
     
     log "Executing BoardDoctor preprocessing..."
     log "Command: $unity_cmd"
     
-    # Execute BoardDoctor
-    eval "$unity_cmd"
-    local exit_code=$?
+    # Execute BoardDoctor with real-time output
+    eval "$unity_cmd" 2>&1 | tee "$LOGS_PATH/unity-boarddoctor-$(date +%Y%m%d-%H%M%S).log"
+    local exit_code=${PIPESTATUS[0]}
     
     if [ $exit_code -eq 0 ]; then
         log "BoardDoctor preprocessing completed successfully"
@@ -171,7 +197,7 @@ build_ios() {
     build_addressables "iOS"
     
     # Build Unity iOS project
-    build_unity "iOS" "iOS" "$ios_build_path" "-development"
+    build_unity "iOS" "iOS" "$ios_build_path" "$PROFILE"
     
     log "iOS Unity build completed. Xcode project available at: $ios_build_path"
     
@@ -198,7 +224,7 @@ build_android() {
     export ANDROID_KEY_PASS
     
     # Build Unity Android project (AAB format)
-    build_unity "Android" "Android" "$android_build_path/app.aab" "-buildAppBundle"
+    build_unity "Android" "Android" "$android_build_path/app.aab" "$PROFILE" "-buildAppBundle"
     
     log "Android Unity build completed. AAB file available at: $android_build_path/app.aab"
     
@@ -216,6 +242,7 @@ main() {
     # Parse command line arguments
     PLATFORM=""
     RELEASE_MODE="development"
+    PROFILE="dev"  # Default to dev profile
     
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -223,8 +250,13 @@ main() {
                 PLATFORM="$2"
                 shift 2
                 ;;
+            --profile)
+                PROFILE="$2"
+                shift 2
+                ;;
             --release)
                 RELEASE_MODE="release"
+                PROFILE="prod"  # Automatically set prod profile for release builds
                 shift
                 ;;
             --doctor)
@@ -232,11 +264,12 @@ main() {
                 exit 0
                 ;;
             --help)
-                echo "Usage: $0 --platform [ios|android|both] [--release] [--doctor]"
+                echo "Usage: $0 --platform [ios|android|both] [--profile dev|prod] [--release] [--doctor]"
                 echo ""
                 echo "Options:"
                 echo "  --platform    Target platform: ios, android, or both"
-                echo "  --release     Build in release mode (default: development)"
+                echo "  --profile     Build profile: dev or prod (default: dev, auto-set to prod with --release)"
+                echo "  --release     Build in release mode and use prod profile (default: development mode with dev profile)"
                 echo "  --doctor      Run BoardDoctor preprocessing only (no build)"
                 echo "  --help        Show this help message"
                 echo ""

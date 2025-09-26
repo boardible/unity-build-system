@@ -19,6 +19,13 @@ if [ -f "$PROJECT_PATH/project-config.sh" ]; then
     log "Loaded project configuration from project-config.sh"
 fi
 
+# Load local environment variables if they exist
+ENV_FILE="$SCRIPT_DIR/.env.ios.local"
+if [ -f "$ENV_FILE" ]; then
+    source "$ENV_FILE"
+    log "Loaded local environment variables from $ENV_FILE"
+fi
+
 # Set defaults if not configured
 export PROJECT_NAME="${PROJECT_NAME:-UnityProject}"
 export IOS_APP_ID="${IOS_APP_ID:-com.yourcompany.yourapp}"
@@ -43,7 +50,10 @@ validate_env_vars() {
         printf ' - %s\n' "${missing_vars[@]}"
         echo ""
         echo "Please set these variables in your CI/CD environment."
-        echo "For local development, create a .env file or export them manually."
+        echo "For local development:"
+        echo "  1. Run: ./Scripts/setupLocalIOS.sh --create-env"
+        echo "  2. Edit: Scripts/.env.ios.local with your values"
+        echo "  3. Re-run this script"
         exit 1
     fi
 }
