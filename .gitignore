@@ -3,3 +3,7 @@
 .env
 *.log
 *.tmp
+
+# Android keystores (sensitive)
+*.jks
+*.keystore

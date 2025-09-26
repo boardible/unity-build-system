@@ -127,6 +127,37 @@ build_addressables() {
     fi
 }
 
+# BoardDoctor Function - Preprocessing
+run_board_doctor() {
+    log "=== Running BoardDoctor Preprocessing ==="
+    
+    # Create logs directory
+    mkdir -p "$LOGS_PATH"
+    
+    # Unity command to run BoardDoctor
+    local unity_cmd="$UNITY_PATH"
+    unity_cmd+=" -batchmode"
+    unity_cmd+=" -quit"
+    unity_cmd+=" -projectPath $PROJECT_PATH"
+    unity_cmd+=" -executeMethod BuildScript.RunBoardDoctor"
+    unity_cmd+=" -logFile $LOGS_PATH/unity-boarddoctor-$(date +%Y%m%d-%H%M%S).log"
+    
+    log "Executing BoardDoctor preprocessing..."
+    log "Command: $unity_cmd"
+    
+    # Execute BoardDoctor
+    eval "$unity_cmd"
+    local exit_code=$?
+    
+    if [ $exit_code -eq 0 ]; then
+        log "BoardDoctor preprocessing completed successfully"
+    else
+        log "BoardDoctor preprocessing failed with exit code $exit_code"
+        log "Check log file: $LOGS_PATH/unity-boarddoctor-*.log"
+        exit $exit_code
+    fi
+}
+
 # iOS Build Function
 build_ios() {
     log "=== iOS Build Process ==="
@@ -196,12 +227,17 @@ main() {
                 RELEASE_MODE="release"
                 shift
                 ;;
+            --doctor)
+                run_board_doctor
+                exit 0
+                ;;
             --help)
-                echo "Usage: $0 --platform [ios|android|both] [--release]"
+                echo "Usage: $0 --platform [ios|android|both] [--release] [--doctor]"
                 echo ""
                 echo "Options:"
                 echo "  --platform    Target platform: ios, android, or both"
                 echo "  --release     Build in release mode (default: development)"
+                echo "  --doctor      Run BoardDoctor preprocessing only (no build)"
                 echo "  --help        Show this help message"
                 echo ""
                 echo "Required Environment Variables:"

@@ -52,9 +52,26 @@ check_gh_cli() {
 
 # Function to get repository info
 get_repo_info() {
-    local repo_url=$(git remote get-url origin 2>/dev/null || echo "")
+    local repo_url=""
+    local script_dir="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+    local project_path="$(dirname "$script_dir")"
+    
+    # Try to get repository info from parent project (if this is a submodule)
+    if [ -d "$project_path/.git" ]; then
+        cd "$project_path"
+        repo_url=$(git remote get-url origin 2>/dev/null || echo "")
+        print_status "info" "Detected parent project repository"
+    fi
+    
+    # Fallback to current directory if parent doesn't have git
+    if [ -z "$repo_url" ]; then
+        repo_url=$(git remote get-url origin 2>/dev/null || echo "")
+        print_status "info" "Using current directory repository"
+    fi
+    
     if [ -z "$repo_url" ]; then
         print_status "error" "Not in a Git repository or no origin remote found"
+        print_status "error" "Make sure to run this script from within a Git project or submodule"
         exit 1
     fi
     
