@@ -48,9 +48,8 @@ export APPLE_TEAM_NAME="Your Team Name"
 # App Store Connect API
 export APPSTORE_KEY_ID="YOUR_KEY_ID"
 export APPSTORE_ISSUER_ID="YOUR_ISSUER_ID"  # UUID format
-export APPSTORE_P8_CONTENT="-----BEGIN PRIVATE KEY-----
-YOUR_P8_CONTENT_HERE
------END PRIVATE KEY-----"
+# Store P8 key as a single line with \n for line breaks
+export APPSTORE_P8_CONTENT="-----BEGIN PRIVATE KEY-----\nYOUR_P8_CONTENT_HERE\n-----END PRIVATE KEY-----"
 
 # Fastlane Match
 export MATCH_PASSWORD="your_match_password"
@@ -179,6 +178,12 @@ main() {
             echo "  # Edit the created .env file with your values"
             echo "  $0 --setup-deps"
             echo "  $0 --deploy"
+            echo ""
+            echo "Important: P8 Key Format"
+            echo "  When setting APPSTORE_P8_CONTENT, use this format:"
+            echo '  export APPSTORE_P8_CONTENT="-----BEGIN PRIVATE KEY-----\nYOUR_ACTUAL_KEY_CONTENT\n-----END PRIVATE KEY-----"'
+            echo "  Replace YOUR_ACTUAL_KEY_CONTENT with the actual base64 content from your .p8 file"
+            echo "  The \\n characters will be converted to actual line breaks automatically"
             ;;
         *)
             print_status "error" "Unknown command: $1"

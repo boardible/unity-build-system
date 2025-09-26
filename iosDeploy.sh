@@ -74,8 +74,8 @@ validate_env_vars \
 # Export configured values
 export IOS_BUILD_PATH="$IOS_BUILD_PATH"
 
-# For legacy compatibility, also set APPSTORE_P8 from APPSTORE_P8_CONTENT
-export APPSTORE_P8="$APPSTORE_P8_CONTENT"
+# Convert single-line P8 content (with \n) to proper multiline format
+export APPSTORE_P8=$(echo -e "$APPSTORE_P8_CONTENT")
 
 log "Environment variables configured successfully"
 log "Apple Team ID: $APPLE_TEAM_ID"
