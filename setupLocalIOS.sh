@@ -28,7 +28,14 @@ print_status() {
 
 # Function to create local environment file
 create_local_env() {
-    cat > "$ENV_FILE" << 'EOF'
+    local template_file="$SCRIPT_DIR/.env.ios.local.template"
+    
+    if [ -f "$template_file" ]; then
+        cp "$template_file" "$ENV_FILE"
+        print_status "success" "Created local environment file from template: $ENV_FILE"
+    else
+        # Fallback to inline creation if template doesn't exist
+        cat > "$ENV_FILE" << 'EOF'
 # Local iOS Development Environment Variables
 # Copy this file and fill in your actual values
 # DO NOT commit this file to git - it contains sensitive information
@@ -57,6 +64,8 @@ export REPO_TOKEN="ghp_your_github_token"
 # export IOS_APP_ID="com.boardible.ineuj"
 # export PROJECT_NAME="INEUJ"
 EOF
+        print_status "success" "Created local environment file: $ENV_FILE"
+    fi
 
     print_status "success" "Created local environment template: $ENV_FILE"
 }
