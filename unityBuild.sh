@@ -24,24 +24,88 @@ if [ -f "$SCRIPT_DIR/.env.android.local" ]; then
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Loaded Android environment variables"
 fi
 
+# Auto-detect Unity version from ProjectSettings/ProjectVersion.txt
+detect_unity_version() {
+    local version_file="$PROJECT_PATH/ProjectSettings/ProjectVersion.txt"
+    if [ -f "$version_file" ]; then
+        # Extract version from m_EditorVersion line
+        local detected_version=$(grep "m_EditorVersion:" "$version_file" | sed 's/m_EditorVersion: //' | tr -d '[:space:]')
+        if [ -n "$detected_version" ]; then
+            echo "$detected_version"
+            return 0
+        fi
+    fi
+    return 1
+}
+
 # Set defaults if not configured
 export PROJECT_NAME="${PROJECT_NAME:-UnityProject}"
-export UNITY_VERSION="${UNITY_VERSION:-6000.0.58f1}"
+# Try to detect Unity version from project, fallback to environment variable or default
+if [ -z "$UNITY_VERSION" ]; then
+    DETECTED_VERSION=$(detect_unity_version)
+    if [ -n "$DETECTED_VERSION" ]; then
+        export UNITY_VERSION="$DETECTED_VERSION"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Auto-detected Unity version: $UNITY_VERSION"
+    else
+        export UNITY_VERSION="6000.0.58f2"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Using default Unity version: $UNITY_VERSION"
+    fi
+fi
 export BUILD_OUTPUT_PATH="${BUILD_OUTPUT_PATH:-build}"
 export UNITY_PROJECT_PATH="${UNITY_PROJECT_PATH:-.}"
 
 BUILD_PATH="$PROJECT_PATH/$BUILD_OUTPUT_PATH"
 LOGS_PATH="$PROJECT_PATH/Logs"
 
-# Unity paths - adjust based on your Unity installation
-UNITY_PATH="/Applications/Unity/Hub/Editor/$UNITY_VERSION/Unity.app/Contents/MacOS/Unity"
-if [ ! -f "$UNITY_PATH" ]; then
-    # Fallback paths for different Unity installations
-    UNITY_PATH="/Applications/Unity/Unity.app/Contents/MacOS/Unity"
-    if [ ! -f "$UNITY_PATH" ]; then
-        echo "Error: Unity not found. Please update UNITY_PATH in this script."
-        exit 1
+# Unity paths - try multiple locations
+detect_unity_path() {
+    local version="$1"
+    local paths=(
+        "/Applications/Unity/Hub/Editor/$version/Unity.app/Contents/MacOS/Unity"
+        "/Applications/Unity/Unity.app/Contents/MacOS/Unity"
+        "$HOME/Applications/Unity/Hub/Editor/$version/Unity.app/Contents/MacOS/Unity"
+    )
+    
+    # First try exact version match
+    for path in "${paths[@]}"; do
+        if [ -f "$path" ]; then
+            echo "$path"
+            return 0
+        fi
+    done
+    
+    # If exact match fails, try fuzzy match (e.g., 6000.0.58f2 -> 6000.0.58f*)
+    local major_version="${version%%.*}"  # Extract major version (e.g., "6000")
+    local fuzzy_pattern="/Applications/Unity/Hub/Editor/${major_version}.*/Unity.app/Contents/MacOS/Unity"
+    
+    # Use compgen to expand glob safely
+    local expanded_paths
+    shopt -s nullglob
+    expanded_paths=($fuzzy_pattern)
+    shopt -u nullglob
+    
+    if [ ${#expanded_paths[@]} -gt 0 ]; then
+        # Return the first match
+        echo "${expanded_paths[0]}"
+        return 0
     fi
+    
+    return 1
+}
+
+UNITY_PATH=$(detect_unity_path "$UNITY_VERSION")
+if [ -z "$UNITY_PATH" ]; then
+    echo "Error: Unity $UNITY_VERSION not found."
+    echo "Checked locations:"
+    echo "  - /Applications/Unity/Hub/Editor/$UNITY_VERSION/Unity.app/Contents/MacOS/Unity"
+    echo "  - /Applications/Unity/Unity.app/Contents/MacOS/Unity"
+    echo "  - ~/Applications/Unity/Hub/Editor/$UNITY_VERSION/Unity.app/Contents/MacOS/Unity"
+    echo ""
+    echo "Project requires Unity version: $UNITY_VERSION (from ProjectSettings/ProjectVersion.txt)"
+    echo "Please install Unity $UNITY_VERSION via Unity Hub or set UNITY_PATH environment variable."
+    exit 1
+else
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Found Unity at: $UNITY_PATH"
 fi
 
 # Function to log with timestamp
@@ -82,8 +146,9 @@ build_unity() {
     mkdir -p "$output_path"
     mkdir -p "$LOGS_PATH"
     
-    # Unity build command (without -quit to allow async operations)
+    # Unity build command WITHOUT -quit (BuildScript.cs handles exit via EditorApplication.Exit)
     local unity_cmd="$UNITY_PATH"
+    # NOTE: -quit removed because BuildScript.cs async methods call EditorApplication.Exit() manually
     unity_cmd+=" -batchmode"
     unity_cmd+=" -nographics"
     unity_cmd+=" -projectPath $PROJECT_PATH"
@@ -113,15 +178,21 @@ build_unity() {
     log "Executing Unity build command..."
     log "Command: $unity_cmd"
     
-    # Execute Unity build with real-time output
-    eval "$unity_cmd" 2>&1 | tee "$LOGS_PATH/unity-build-$platform-$(date +%Y%m%d-%H%M%S).log"
+    # Execute Unity build with real-time output and log file
+    local log_file="$LOGS_PATH/unity-build-$platform-$(date +%Y%m%d-%H%M%S).log"
+    
+    # Run Unity and capture exit code properly
+    eval "$unity_cmd" 2>&1 | tee "$log_file"
     local exit_code=${PIPESTATUS[0]}
     
     if [ $exit_code -eq 0 ]; then
         log "Unity build for $platform completed successfully"
+        log "Log file: $log_file"
     else
         log "Unity build for $platform failed with exit code $exit_code"
-        log "Check log file: $LOGS_PATH/unity-build-$platform-*.log"
+        log "Check log file: $log_file"
+        log "Last 20 lines of build log:"
+        tail -20 "$log_file" 2>/dev/null || echo "Could not read log file"
         exit $exit_code
     fi
 }
@@ -132,54 +203,27 @@ build_addressables() {
     
     log "Building Addressables for $platform..."
     
+    # Unity command WITHOUT -quit (BuildScript.cs handles exit via EditorApplication.Exit)
     local unity_cmd="$UNITY_PATH"
+    # NOTE: -quit removed because BuildScript.cs calls EditorApplication.Exit() manually
     unity_cmd+=" -batchmode"
     unity_cmd+=" -nographics"
     unity_cmd+=" -projectPath $PROJECT_PATH"
     unity_cmd+=" -executeMethod BuildScript.BuildAddressables"
     unity_cmd+=" -buildTarget $platform"
-    unity_cmd+=" -logFile /dev/null"
     unity_cmd+=" -stackTraceLogType None"
     
     log "Building Addressables..."
-    eval "$unity_cmd" 2>&1 | tee "$LOGS_PATH/addressables-build-$platform-$(date +%Y%m%d-%H%M%S).log"
+    local log_file="$LOGS_PATH/addressables-build-$platform-$(date +%Y%m%d-%H%M%S).log"
+    eval "$unity_cmd" 2>&1 | tee "$log_file"
     local exit_code=${PIPESTATUS[0]}
     
     if [ $exit_code -eq 0 ]; then
         log "Addressables build for $platform completed successfully"
+        log "Log file: $log_file"
     else
         log "Addressables build for $platform failed with exit code $exit_code"
-        exit $exit_code
-    fi
-}
-
-# BoardDoctor Function - Preprocessing
-run_board_doctor() {
-    log "=== Running BoardDoctor Preprocessing ==="
-    
-    # Create logs directory
-    mkdir -p "$LOGS_PATH"
-    
-    # Unity command to run BoardDoctor (without -quit to allow async operations)
-    local unity_cmd="$UNITY_PATH"
-    unity_cmd+=" -batchmode"
-    unity_cmd+=" -nographics"
-    unity_cmd+=" -projectPath $PROJECT_PATH"
-    unity_cmd+=" -executeMethod BuildScript.RunBoardDoctor"
-    unity_cmd+=" -stackTraceLogType None"
-    
-    log "Executing BoardDoctor preprocessing..."
-    log "Command: $unity_cmd"
-    
-    # Execute BoardDoctor with real-time output
-    eval "$unity_cmd" 2>&1 | tee "$LOGS_PATH/unity-boarddoctor-$(date +%Y%m%d-%H%M%S).log"
-    local exit_code=${PIPESTATUS[0]}
-    
-    if [ $exit_code -eq 0 ]; then
-        log "BoardDoctor preprocessing completed successfully"
-    else
-        log "BoardDoctor preprocessing failed with exit code $exit_code"
-        log "Check log file: $LOGS_PATH/unity-boarddoctor-*.log"
+        log "Check log file: $log_file"
         exit $exit_code
     fi
 }
@@ -193,13 +237,65 @@ build_ios() {
     
     local ios_build_path="$BUILD_PATH/iOS"
     
-    # Build Addressables first
-    build_addressables "iOS"
-    
-    # Build Unity iOS project
+    # Build Unity iOS project (Addressables + Build in single session)
+    # Note: BoardDoctor removed - run Scripts/runBoardDoctor.sh separately if needed
     build_unity "iOS" "iOS" "$ios_build_path" "$PROFILE"
     
     log "iOS Unity build completed. Xcode project available at: $ios_build_path"
+    
+    # SAFETY NET: Clean up duplicate CocoaPods sources in Podfile
+    # This ensures Podfile only has ONE source line (CDN) before pod install
+    local podfile_path="$ios_build_path/Podfile"
+    if [ -f "$podfile_path" ]; then
+        log "Checking Podfile for duplicate sources..."
+        
+        # Count source lines
+        local source_count=$(grep -c "^source " "$podfile_path" 2>/dev/null || echo "0")
+        
+        if [ "$source_count" -gt 1 ]; then
+            log "⚠️  Found $source_count source lines in Podfile, cleaning up duplicates..."
+            
+            # Show what we found
+            log "Current sources:"
+            grep "^source " "$podfile_path" | while read -r line; do
+                log "  - $line"
+            done
+            
+            # Keep only the first source line (CDN), remove all others
+            # Create a temp file with all lines except duplicate source lines
+            local temp_file="${podfile_path}.tmp"
+            local found_source=false
+            
+            while IFS= read -r line; do
+                if [[ "$line" =~ ^source ]]; then
+                    if [ "$found_source" = false ]; then
+                        # First source line - ensure it's the CDN source
+                        echo "source 'https://cdn.cocoapods.org/'" >> "$temp_file"
+                        found_source=true
+                        log "✓ Kept CDN source"
+                    else
+                        # Duplicate source line - skip it
+                        log "✗ Removed duplicate: $line"
+                    fi
+                else
+                    echo "$line" >> "$temp_file"
+                fi
+            done < "$podfile_path"
+            
+            # Replace original with cleaned version
+            mv "$temp_file" "$podfile_path"
+            
+            log "✓ Podfile cleaned - now has single source"
+            log "Final sources:"
+            grep "^source " "$podfile_path" | while read -r line; do
+                log "  - $line"
+            done
+        else
+            log "✓ Podfile already has single source (count: $source_count)"
+        fi
+    else
+        log "⚠️  Podfile not found at: $podfile_path"
+    fi
     
     # Set environment variables for downstream processes
     export IOS_BUILD_PATH="$ios_build_path"
@@ -214,16 +310,13 @@ build_android() {
     
     local android_build_path="$BUILD_PATH/Android"
     
-    # Build Addressables first
-    build_addressables "Android"
-    
     # Set Android keystore environment variables for Unity
     export ANDROID_KEYSTORE_PATH
     export ANDROID_KEYSTORE_PASS
     export ANDROID_KEY_ALIAS
     export ANDROID_KEY_PASS
     
-    # Build Unity Android project (AAB format)
+    # Build Unity Android project (now includes BoardDoctor + Addressables + Build in single session)
     build_unity "Android" "Android" "$android_build_path/app.aab" "$PROFILE" "-buildAppBundle"
     
     log "Android Unity build completed. AAB file available at: $android_build_path/app.aab"
@@ -259,19 +352,17 @@ main() {
                 PROFILE="prod"  # Automatically set prod profile for release builds
                 shift
                 ;;
-            --doctor)
-                run_board_doctor
-                exit 0
-                ;;
             --help)
-                echo "Usage: $0 --platform [ios|android|both] [--profile dev|prod] [--release] [--doctor]"
+                echo "Usage: $0 --platform [ios|android|both] [--profile dev|prod] [--release]"
                 echo ""
                 echo "Options:"
-                echo "  --platform    Target platform: ios, android, or both"
-                echo "  --profile     Build profile: dev or prod (default: dev, auto-set to prod with --release)"
-                echo "  --release     Build in release mode and use prod profile (default: development mode with dev profile)"
-                echo "  --doctor      Run BoardDoctor preprocessing only (no build)"
-                echo "  --help        Show this help message"
+                echo "  --platform           Target platform: ios, android, or both"
+                echo "  --profile            Build profile: dev or prod (default: dev, auto-set to prod with --release)"
+                echo "  --release            Build in release mode and use prod profile (default: development mode with dev profile)"
+                echo "  --help               Show this help message"
+                echo ""
+                echo "Note: BoardDoctor has been removed from the build process."
+                echo "      Run Scripts/runBoardDoctor.sh separately when game data needs refresh."
                 echo ""
                 echo "Required Environment Variables:"
                 echo "For iOS:"

@@ -89,7 +89,7 @@ on:
         type: boolean
 
 env:
-  UNITY_VERSION: "6000.0.58f1"
+  UNITY_VERSION: "6000.0.58f2"
 
 jobs:
   build:
@@ -179,7 +179,7 @@ stages:
   - deploy
 
 variables:
-  UNITY_VERSION: "6000.0.58f1"
+  UNITY_VERSION: "6000.0.58f2"
   UNITY_BUILD_MODE: "release"
 
 .unity_before_script: &unity_before_script

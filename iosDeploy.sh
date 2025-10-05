@@ -71,8 +71,54 @@ validate_env_vars \
     "MATCH_PASSWORD" \
     "REPO_TOKEN"
 
+# Ensure CocoaPods specs repo isn\'t duplicated (older git mirror vs CDN trunk)
+cleanup_cocoapods_repos() {
+    local repos_root="$HOME/.cocoapods/repos"
+
+    if [ ! -d "$repos_root" ]; then
+        return
+    fi
+
+    # Remove legacy git-based specs repos that conflict with the CDN trunk
+    for legacy_repo in "cocoapods" "master"; do
+        local legacy_path="$repos_root/$legacy_repo"
+
+        if [ -d "$legacy_path" ]; then
+            log "Removing stale CocoaPods specs repo: $legacy_path"
+            rm -rf "$legacy_path"
+        fi
+    done
+}
+
+# Run cleanup early to avoid duplicate spec listings later
+cleanup_cocoapods_repos
+
 # Export configured values
 export IOS_BUILD_PATH="$IOS_BUILD_PATH"
+
+# Set derived data path for Xcode incremental builds
+export DERIVED_DATA_PATH="$HOME/Library/Developer/Xcode/DerivedData/Unity-iPhone"
+
+# Check if --clean flag is passed
+CLEAN_BUILD=false
+for arg in "$@"; do
+    if [ "$arg" == "--clean" ]; then
+        CLEAN_BUILD=true
+        break
+    fi
+done
+
+# Clean DerivedData if requested (useful after Xcode/Unity updates or linker flag changes)
+if [ "$CLEAN_BUILD" == "true" ]; then
+    log "Clean build requested - removing DerivedData cache..."
+    if [ -d "$DERIVED_DATA_PATH" ]; then
+        rm -rf "$DERIVED_DATA_PATH"
+        log "DerivedData cleaned: $DERIVED_DATA_PATH"
+    fi
+    export FASTLANE_CLEAN_BUILD="true"
+else
+    export FASTLANE_CLEAN_BUILD="false"
+fi
 
 # Convert single-line P8 content (with \n) to proper multiline format
 export APPSTORE_P8=$(echo -e "$APPSTORE_P8_CONTENT")
@@ -81,6 +127,7 @@ log "Environment variables configured successfully"
 log "Apple Team ID: $APPLE_TEAM_ID"
 log "iOS App ID: $IOS_APP_ID"
 log "Build Path: $IOS_BUILD_PATH"
+log "Derived Data Path: $DERIVED_DATA_PATH"
 
 # Navigate to project root for Fastlane
 cd "$PROJECT_PATH"
@@ -102,6 +149,9 @@ eval "$(ssh-agent -s)"
 # Install Ruby dependencies
 log "Installing Ruby dependencies..."
 bundle install
+
+# Clean up CocoaPods repos again in case bundler created legacy mirrors via plugins
+cleanup_cocoapods_repos
 
 # Deploy to TestFlight
 log "Deploying to TestFlight..."
