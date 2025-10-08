@@ -63,13 +63,22 @@ validate_env_vars \
     "GOOGLE_PLAY_SERVICE_ACCOUNT_JSON" \
     "ANDROID_PACKAGE_NAME"
 
+# Validate that GOOGLE_PLAY_SERVICE_ACCOUNT_JSON contains valid JSON
+if ! echo "$GOOGLE_PLAY_SERVICE_ACCOUNT_JSON" | python3 -m json.tool > /dev/null 2>&1; then
+    log "Error: GOOGLE_PLAY_SERVICE_ACCOUNT_JSON is not valid JSON"
+    log "Please check the format of your service account credentials"
+    exit 1
+fi
+
 # Log configuration
 log "Project: $PROJECT_NAME"
 log "Package: $ANDROID_PACKAGE_NAME"
 log "Deploy Track: $DEPLOY_TRACK"
 
-# Create temporary service account file from environment variable
-TEMP_SERVICE_ACCOUNT_FILE="$PROJECT_PATH/temp_service_account.json"
+# Create temporary service account file from environment variable using secure temp file
+TEMP_SERVICE_ACCOUNT_FILE=$(mktemp "${TMPDIR:-/tmp}/service_account.XXXXXX.json")
+trap "rm -f '$TEMP_SERVICE_ACCOUNT_FILE'" EXIT INT TERM
+
 echo "$GOOGLE_PLAY_SERVICE_ACCOUNT_JSON" > "$TEMP_SERVICE_ACCOUNT_FILE"
 
 # Set environment variables for Fastlane
@@ -126,11 +135,7 @@ else
     log "Skipping Addressables upload"
 fi
 
-# Cleanup temporary files
-if [ -f "$TEMP_SERVICE_ACCOUNT_FILE" ]; then
-    rm "$TEMP_SERVICE_ACCOUNT_FILE"
-    log "Cleaned up temporary service account file"
-fi
+# Note: Temporary service account file cleanup is handled by trap on EXIT
 
 log "Android deployment completed successfully"
 exit 0

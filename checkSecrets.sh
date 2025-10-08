@@ -145,6 +145,8 @@ main() {
     # Android secrets
     echo "🤖 Android Secrets:"
     check_secret "GOOGLE_PLAY_SERVICE_ACCOUNT_JSON" "Google Play Service Account JSON" "true" || ((missing_required++))
+    check_secret "FB_APP_ID" "Facebook App ID" "true" || ((missing_required++))
+    check_secret "FB_CLIENT_TOKEN" "Facebook Client Token" "true" || ((missing_required++))
     check_secret "ANDROID_KEYSTORE_BASE64" "Android keystore (base64 encoded)" "true" || ((missing_required++))
     check_secret "ANDROID_KEYSTORE_PASS" "Android keystore password" "true" || ((missing_required++))
     check_secret "ANDROID_KEY_ALIAS" "Android key alias" "true" || ((missing_required++))

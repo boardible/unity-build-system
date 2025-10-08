@@ -142,8 +142,15 @@ build_unity() {
     
     log "Building Unity project for $platform using $profile profile..."
     
-    # Create build directory
-    mkdir -p "$output_path"
+    # Create build directory (handle file outputs like .aab/.apk)
+    case "$output_path" in
+        *.aab|*.apk)
+            mkdir -p "$(dirname "$output_path")"
+            ;;
+        *)
+            mkdir -p "$output_path"
+            ;;
+    esac
     mkdir -p "$LOGS_PATH"
     
     # Unity build command WITHOUT -quit (BuildScript.cs handles exit via EditorApplication.Exit)
@@ -181,8 +188,16 @@ build_unity() {
     # Execute Unity build with real-time output and log file
     local log_file="$LOGS_PATH/unity-build-$platform-$(date +%Y%m%d-%H%M%S).log"
     
-    # Run Unity and capture exit code properly
-    eval "$unity_cmd" 2>&1 | tee "$log_file"
+    # Run Unity directly without eval for security
+    "$UNITY_PATH" -batchmode -nographics \
+        -projectPath "$PROJECT_PATH" \
+        -buildTarget "$build_target" \
+        -buildPath "$output_path" \
+        -executeMethod "BuildScript.$method_name" \
+        -profile "$profile" \
+        -stackTraceLogType None \
+        $additional_args \
+        2>&1 | tee "$log_file"
     local exit_code=${PIPESTATUS[0]}
     
     if [ $exit_code -eq 0 ]; then
@@ -215,7 +230,14 @@ build_addressables() {
     
     log "Building Addressables..."
     local log_file="$LOGS_PATH/addressables-build-$platform-$(date +%Y%m%d-%H%M%S).log"
-    eval "$unity_cmd" 2>&1 | tee "$log_file"
+    
+    # Run Unity directly without eval for security
+    "$UNITY_PATH" -batchmode -nographics \
+        -projectPath "$PROJECT_PATH" \
+        -executeMethod "BuildScript.BuildAddressables" \
+        -buildTarget "$platform" \
+        -stackTraceLogType None \
+        2>&1 | tee "$log_file"
     local exit_code=${PIPESTATUS[0]}
     
     if [ $exit_code -eq 0 ]; then

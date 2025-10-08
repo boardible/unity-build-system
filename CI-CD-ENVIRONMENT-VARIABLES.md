@@ -51,7 +51,14 @@ GOOGLE_PLAY_SERVICE_ACCOUNT_JSON='{
 # Android App Configuration
 ANDROID_PACKAGE_NAME=com.boardible.ineuj
 
-# Code Signing (for local builds)
+# Facebook SDK Configuration
+FB_APP_ID=your_facebook_app_id
+FB_CLIENT_TOKEN=your_facebook_client_token
+
+# Code Signing
+# For CI/CD: Use ANDROID_KEYSTORE_BASE64 (base64-encoded keystore file)
+# For local: Use ANDROID_KEYSTORE_PATH (path to keystore file)
+ANDROID_KEYSTORE_BASE64=base64_encoded_keystore_content
 ANDROID_KEYSTORE_PATH=/path/to/your/keystore.jks
 ANDROID_KEYSTORE_PASS=your_keystore_password
 ANDROID_KEY_ALIAS=your_key_alias
