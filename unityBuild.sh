@@ -142,6 +142,18 @@ build_unity() {
     
     log "Building Unity project for $platform using $profile profile..."
     
+    # Validate link.xml before building
+    log "Validating link.xml configuration..."
+    if [ -f "$SCRIPT_DIR/validate-linkxml.sh" ]; then
+        if ! "$SCRIPT_DIR/validate-linkxml.sh"; then
+            log "❌ link.xml validation failed!"
+            log "Build aborted to prevent code stripping issues."
+            exit 1
+        fi
+    else
+        log "⚠️  Warning: validate-linkxml.sh not found, skipping validation"
+    fi
+    
     # Create build directory (handle file outputs like .aab/.apk)
     case "$output_path" in
         *.aab|*.apk)

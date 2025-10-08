@@ -59,16 +59,14 @@ fi
 print_status "Step 2/6: Extracting Firebase SDK..."
 unzip -q "firebase_sdk.zip"
 
-# Find Firebase packages
+# Find Firebase packages (only the ones we actually use)
 FIREBASE_PACKAGES=(
     "FirebaseAnalytics.unitypackage"
     "FirebaseAuth.unitypackage"
-    "FirebaseFirestore.unitypackage"
     "FirebaseMessaging.unitypackage"
     "FirebaseCrashlytics.unitypackage"
-    "FirebaseRemoteConfig.unitypackage"
-    "FirebaseStorage.unitypackage"
-    "FirebaseFunctions.unitypackage"
+    # Removed: Firestore (using AWS DynamoDB instead)
+    # Removed: Database, Storage, Functions, RemoteConfig, AppCheck (not used)
 )
 
 # Extract each Firebase package manually using tar
