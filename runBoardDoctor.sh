@@ -3,6 +3,11 @@
 # BoardDoctor Standalone Script
 # Runs BoardDoctor preprocessing independently of the build process
 # Use this when you need to refresh game data, localization, textures, etc.
+# 
+# Usage:
+#   ./runBoardDoctor.sh          # Defaults to dev environment
+#   ./runBoardDoctor.sh dev      # Explicitly use dev environment
+#   ./runBoardDoctor.sh prod     # Use production environment
 
 set -e  # Exit on any error
 
@@ -10,6 +15,14 @@ echo "========================================"
 echo " BoardDoctor Preprocessing"
 echo "========================================"
 echo ""
+
+# Parse environment argument (dev or prod)
+ENVIRONMENT="${1:-dev}"  # Default to dev if not specified
+if [ "$ENVIRONMENT" != "dev" ] && [ "$ENVIRONMENT" != "prod" ]; then
+    echo "❌ Error: Invalid environment '$ENVIRONMENT'. Must be 'dev' or 'prod'"
+    echo "Usage: $0 [dev|prod]"
+    exit 1
+fi
 
 # Get script directory and project paths
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
@@ -77,6 +90,7 @@ if [ -z "$UNITY_PATH" ]; then
 fi
 
 log "=== BoardDoctor Standalone Execution ==="
+log "Environment: $ENVIRONMENT"
 log "Project Path: $PROJECT_PATH"
 log "Unity Path: $UNITY_PATH"
 
@@ -84,6 +98,24 @@ log "Unity Path: $UNITY_PATH"
 LOGS_PATH="$PROJECT_PATH/Logs"
 mkdir -p "$LOGS_PATH"
 
+# Step 1: Sync CSVs from Google Sheets to S3
+log "=== Step 1: Syncing CSVs to S3 ($ENVIRONMENT) ==="
+CSV_SYNC_SCRIPT="$SCRIPT_DIR/sync-csv-to-s3.sh"
+if [ -f "$CSV_SYNC_SCRIPT" ]; then
+    log "Running CSV sync script for $ENVIRONMENT environment..."
+    if bash "$CSV_SYNC_SCRIPT" "$ENVIRONMENT"; then
+        log "✅ CSV sync completed successfully"
+    else
+        log "⚠️  CSV sync failed - continuing with existing CSVs"
+        # Don't exit, just warn - BoardDoctor can continue with cached CSVs
+    fi
+else
+    log "⚠️  CSV sync script not found at $CSV_SYNC_SCRIPT"
+    log "Skipping CSV sync - using existing CSVs"
+fi
+log ""
+
+# Step 2: Execute Unity BoardDoctor
 # Unity command WITHOUT -quit (BuildScript.cs handles exit via EditorApplication.Exit)
 unity_cmd="$UNITY_PATH"
 # NOTE: -quit removed because BuildScript.RunBoardDoctor() calls EditorApplication.Exit() manually
@@ -93,7 +125,7 @@ unity_cmd+=" -projectPath $PROJECT_PATH"
 unity_cmd+=" -executeMethod BuildScript.RunBoardDoctor"
 unity_cmd+=" -stackTraceLogType None"
 
-log "Executing BoardDoctor..."
+log "=== Step 2: Executing Unity BoardDoctor ==="
 log "This will refresh:"
 log "  - Localization files"
 log "  - Textures"

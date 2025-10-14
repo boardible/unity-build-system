@@ -10,6 +10,29 @@ This is a reusable build and deployment system for Unity projects. The system us
 - **Cost-Efficient**: Selective branch triggering
 - **Modern**: Clean, maintainable scripts with proper error handling
 - **Reusable**: Designed as a git submodule for multiple projects
+- **CSV to S3**: Automated migration from Google Sheets to S3 + CloudFront
+
+## 📋 Quick Reference
+
+### CSV Management (New!)
+```bash
+# Test migration setup
+./Scripts/test-csv-migration.sh
+
+# Sync CSVs to S3 (dev)
+./Scripts/sync-csv-to-s3.sh dev
+
+# Sync CSVs to S3 (prod)
+./Scripts/sync-csv-to-s3.sh prod
+
+# Or use Unity Editor: Boardible > AWS > S3 > Sync CSVs
+```
+See [CSV_TO_S3_MIGRATION.md](../CSV_TO_S3_MIGRATION.md) for full documentation.
+
+### BoardDoctor (Auto-syncs dev CSVs)
+```bash
+./Scripts/runBoardDoctor.sh
+```
 
 ## 📁 Integration as Submodule
 
