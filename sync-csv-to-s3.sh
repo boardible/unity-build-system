@@ -390,26 +390,68 @@ main() {
         exit 1
     fi
     
-    # Check AWS credentials (with SSO support)
+    # Check AWS credentials (with SSO support and auto-login)
     local aws_cmd="aws"
     if [ -n "$AWS_PROFILE" ]; then
         aws_cmd="aws --profile $AWS_PROFILE"
         log_info "Using AWS profile: $AWS_PROFILE"
     fi
     
+    # Try to get caller identity
     if ! $aws_cmd sts get-caller-identity &> /dev/null; then
-        log_error "AWS credentials not configured or expired."
+        log_warn "AWS credentials expired or not configured."
+        
+        # If using SSO profile, attempt automatic login
         if [ -n "$AWS_PROFILE" ]; then
-            log_error "  aws sso login --profile $AWS_PROFILE"
+            local profile_type=$(aws configure get sso_start_url --profile "$AWS_PROFILE" 2>/dev/null || echo "")
+            
+            if [ -n "$profile_type" ]; then
+                # This is an SSO profile - attempt automatic login
+                log_info "Attempting automatic SSO login..."
+                log_info "This will open your browser for authentication."
+                echo ""
+                
+                # Run aws sso login and capture exit code
+                if aws sso login --profile "$AWS_PROFILE"; then
+                    log_success "SSO login successful!"
+                    echo ""
+                    
+                    # Verify credentials now work
+                    if $aws_cmd sts get-caller-identity &> /dev/null; then
+                        log_success "AWS credentials verified"
+                    else
+                        log_error "SSO login completed but credentials still not working."
+                        log_error "This might be a configuration issue."
+                        exit 1
+                    fi
+                else
+                    log_error "SSO login failed or was cancelled."
+                    log_error "Please ensure you have access to the AWS SSO portal."
+                    log_error "You can try manually with:"
+                    log_error "  aws sso login --profile $AWS_PROFILE"
+                    exit 1
+                fi
+            else
+                # Not an SSO profile
+                log_error "AWS credentials not configured."
+                log_error "Option 1 - Use AWS SSO (recommended):"
+                log_error "  aws configure sso"
+                log_error "  export AWS_PROFILE=PowerUserAccess-325252612153"
+                log_error ""
+                log_error "Option 2 - Use access keys:"
+                log_error "  aws configure"
+                exit 1
+            fi
         else
+            log_error "AWS credentials not configured."
             log_error "Option 1 - Use AWS SSO (recommended):"
             log_error "  aws configure sso"
             log_error "  export AWS_PROFILE=PowerUserAccess-325252612153"
             log_error ""
             log_error "Option 2 - Use access keys:"
             log_error "  aws configure"
+            exit 1
         fi
-        exit 1
     fi
     
     # Load AWS configuration

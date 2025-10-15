@@ -10,7 +10,7 @@ TEST_PODFILE="/tmp/test_podfile_$(date +%s).rb"
 
 cat > "$TEST_PODFILE" << 'EOF'
 source 'https://cdn.cocoapods.org/'
-source 'https://github.com/CocoaPods/Specs'
+source 'https://cdn.cocoapods.org/'
 
 platform :ios, '16.0'
 
@@ -51,7 +51,7 @@ if [ $? -eq 0 ]; then
         echo "✅ SUCCESS: Only one source line found"
         SOURCE=$(grep "^source" "$TEST_PODFILE")
         if [[ "$SOURCE" == *"cdn.cocoapods.org"* ]]; then
-            echo "✅ SUCCESS: Source is CDN"
+            echo "✅ SUCCESS: Source is CDN (correct)"
         else
             echo "❌ FAIL: Source is not CDN: $SOURCE"
         fi

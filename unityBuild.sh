@@ -262,6 +262,135 @@ build_addressables() {
     fi
 }
 
+# Check if BoardDoctor should be run
+check_boarddoctor() {
+    local platform=$1
+    local profile=$2
+    
+    # Path to track BoardDoctor runs
+    local tracker_dir="$PROJECT_PATH/.build-cache"
+    local tracker_file="$tracker_dir/boarddoctor-${platform}-${profile}.tracker"
+    
+    mkdir -p "$tracker_dir"
+    
+    # Check if BoardDoctor was already run for this configuration
+    if [ -f "$tracker_file" ]; then
+        local last_run=$(cat "$tracker_file" 2>/dev/null || echo "unknown")
+        log "BoardDoctor was last run for $platform/$profile on: $last_run"
+        
+        # Only prompt in interactive mode (not in CI/CD)
+        if [ -t 0 ]; then
+            echo ""
+            echo "═══════════════════════════════════════════════════"
+            echo "  BoardDoctor Check"
+            echo "═══════════════════════════════════════════════════"
+            echo ""
+            echo "BoardDoctor refreshes game data, localization, textures, etc."
+            echo "Last run: $last_run for $platform/$profile"
+            echo ""
+            echo "Do you want to run BoardDoctor before building?"
+            echo ""
+            echo "  [y] Yes - Run BoardDoctor + CSV sync (recommended for data changes)"
+            echo "  [n] No  - Skip and use existing data (faster)"
+            echo "  [s] Skip and don't ask again for this build session"
+            echo ""
+            read -p "Your choice [y/n/s]: " -n 1 -r choice
+            echo ""
+            echo ""
+            
+            case "$choice" in
+                y|Y)
+                    log "Running BoardDoctor..."
+                    run_boarddoctor "$profile"
+                    ;;
+                s|S)
+                    log "Skipping BoardDoctor prompt for this session"
+                    export SKIP_BOARDDOCTOR_PROMPT=true
+                    ;;
+                *)
+                    log "Skipping BoardDoctor, using existing data"
+                    ;;
+            esac
+        else
+            log "Running in non-interactive mode (CI/CD), skipping BoardDoctor prompt"
+        fi
+    else
+        log "BoardDoctor has never been run for $platform/$profile configuration"
+        
+        # Only prompt in interactive mode
+        if [ -t 0 ]; then
+            echo ""
+            echo "═══════════════════════════════════════════════════"
+            echo "  ⚠️  BoardDoctor Required"
+            echo "═══════════════════════════════════════════════════"
+            echo ""
+            echo "This is the first build for $platform/$profile."
+            echo "BoardDoctor must run to prepare game data, localization, etc."
+            echo ""
+            read -p "Run BoardDoctor now? [Y/n]: " -n 1 -r choice
+            echo ""
+            echo ""
+            
+            case "$choice" in
+                n|N)
+                    log "⚠️  WARNING: Building without BoardDoctor may cause runtime errors"
+                    log "You can run it manually later: ./Scripts/runBoardDoctor.sh $profile"
+                    ;;
+                *)
+                    log "Running BoardDoctor..."
+                    run_boarddoctor "$profile"
+                    ;;
+            esac
+        else
+            log "⚠️  WARNING: BoardDoctor has never run for this config, but running in non-interactive mode"
+            log "Build may have missing data. Run manually: ./Scripts/runBoardDoctor.sh $profile"
+        fi
+    fi
+}
+
+# Run BoardDoctor and update tracker
+run_boarddoctor() {
+    local profile=$1
+    local boarddoctor_script="$SCRIPT_DIR/runBoardDoctor.sh"
+    
+    if [ ! -f "$boarddoctor_script" ]; then
+        log "❌ Error: BoardDoctor script not found at $boarddoctor_script"
+        return 1
+    fi
+    
+    log "=== Executing BoardDoctor for $profile environment ==="
+    
+    # Run BoardDoctor
+    if bash "$boarddoctor_script" "$profile"; then
+        log "✅ BoardDoctor completed successfully"
+        
+        # Update tracker for both platforms (BoardDoctor output is platform-agnostic)
+        local tracker_dir="$PROJECT_PATH/.build-cache"
+        mkdir -p "$tracker_dir"
+        local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+        echo "$timestamp" > "$tracker_dir/boarddoctor-iOS-${profile}.tracker"
+        echo "$timestamp" > "$tracker_dir/boarddoctor-Android-${profile}.tracker"
+        
+        return 0
+    else
+        log "❌ BoardDoctor failed"
+        echo ""
+        read -p "Continue with build anyway? [y/N]: " -n 1 -r choice
+        echo ""
+        
+        case "$choice" in
+            y|Y)
+                log "Continuing build despite BoardDoctor failure..."
+                return 0
+                ;;
+            *)
+                log "Build cancelled due to BoardDoctor failure"
+                exit 1
+                ;;
+        esac
+    fi
+}
+
 # iOS Build Function
 build_ios() {
     log "=== iOS Build Process ==="
@@ -269,16 +398,21 @@ build_ios() {
     # Validate iOS environment variables
     validate_env_vars "IOS_APP_ID" "APPLE_TEAM_ID"
     
+    # Check if BoardDoctor should be run (unless already prompted in this session)
+    if [ "$SKIP_BOARDDOCTOR_PROMPT" != "true" ]; then
+        check_boarddoctor "iOS" "$PROFILE"
+    fi
+    
     local ios_build_path="$BUILD_PATH/iOS"
     
     # Build Unity iOS project (Addressables + Build in single session)
-    # Note: BoardDoctor removed - run Scripts/runBoardDoctor.sh separately if needed
     build_unity "iOS" "iOS" "$ios_build_path" "$PROFILE"
     
     log "iOS Unity build completed. Xcode project available at: $ios_build_path"
     
     # SAFETY NET: Clean up duplicate CocoaPods sources in Podfile
-    # This ensures Podfile only has ONE source line (CDN) before pod install
+    # This ensures Podfile only has ONE source line (GitHub Specs) before pod install
+    # The CDN source is deprecated and causes builds to hang
     local podfile_path="$ios_build_path/Podfile"
     if [ -f "$podfile_path" ]; then
         log "Checking Podfile for duplicate sources..."
@@ -295,7 +429,8 @@ build_ios() {
                 log "  - $line"
             done
             
-            # Keep only the first source line (CDN), remove all others
+            # Keep only the first source line (GitHub Specs), remove all others
+            # CDN source is deprecated and causes hangs
             # Create a temp file with all lines except duplicate source lines
             local temp_file="${podfile_path}.tmp"
             local found_source=false
@@ -327,6 +462,13 @@ build_ios() {
         else
             log "✓ Podfile already has single source (count: $source_count)"
         fi
+        
+        # SAFETY NET: Remove deprecated Firebase/Core pod (removed in Firebase SDK 11.0+)
+        if grep -q "pod 'Firebase/Core'" "$podfile_path"; then
+            log "⚠️  Found deprecated Firebase/Core pod, removing..."
+            sed -i '' "/pod 'Firebase\/Core'/d" "$podfile_path"
+            log "✓ Removed Firebase/Core pod"
+        fi
     else
         log "⚠️  Podfile not found at: $podfile_path"
     fi
@@ -341,6 +483,11 @@ build_android() {
     
     # Validate Android environment variables
     validate_env_vars "ANDROID_PACKAGE_NAME" "ANDROID_KEYSTORE_PATH" "ANDROID_KEYSTORE_PASS" "ANDROID_KEY_ALIAS" "ANDROID_KEY_PASS"
+    
+    # Check if BoardDoctor should be run (unless already prompted in this session)
+    if [ "$SKIP_BOARDDOCTOR_PROMPT" != "true" ]; then
+        check_boarddoctor "Android" "$PROFILE"
+    fi
     
     local android_build_path="$BUILD_PATH/Android"
     
@@ -395,8 +542,15 @@ main() {
                 echo "  --release            Build in release mode and use prod profile (default: development mode with dev profile)"
                 echo "  --help               Show this help message"
                 echo ""
-                echo "Note: BoardDoctor has been removed from the build process."
-                echo "      Run Scripts/runBoardDoctor.sh separately when game data needs refresh."
+                echo "BoardDoctor Integration:"
+                echo "  The build script will automatically prompt you to run BoardDoctor if:"
+                echo "    - This is the first build for a platform/profile combination"
+                echo "    - BoardDoctor hasn't been run recently for this configuration"
+                echo ""
+                echo "  BoardDoctor refreshes game data, localization, textures, and CSV files."
+                echo "  You can also run it manually: ./Scripts/runBoardDoctor.sh [dev|prod]"
+                echo ""
+                echo "  Build tracking: .build-cache/boarddoctor-{platform}-{profile}.tracker"
                 echo ""
                 echo "Required Environment Variables:"
                 echo "For iOS:"
