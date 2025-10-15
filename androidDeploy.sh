@@ -105,6 +105,26 @@ if [ ! -f "$ANDROID_BUILD_FILE_PATH" ]; then
     exit 1
 fi
 
+# Generate baseline profile for faster cold start (optional, can be skipped)
+log "Checking for baseline profile generation..."
+if [ "$GENERATE_BASELINE_PROFILE" = "1" ]; then
+    log "Generating baseline profile for cold start optimization..."
+    if [ -f "$SCRIPT_DIR/generate-baseline-profile.sh" ]; then
+        if "$SCRIPT_DIR/generate-baseline-profile.sh"; then
+            log "✅ Baseline profile generated successfully"
+            log "Next build will include optimized cold start profile"
+        else
+            log "⚠️  Baseline profile generation failed, continuing without it"
+            log "You can generate it manually later with: ./Scripts/generate-baseline-profile.sh"
+        fi
+    else
+        log "⚠️  Baseline profile script not found, skipping"
+    fi
+else
+    log "Skipping baseline profile generation (set GENERATE_BASELINE_PROFILE=1 to enable)"
+    log "Baseline profiles improve cold start by ~15-30%"
+fi
+
 # Navigate to project root for Fastlane
 cd "$PROJECT_PATH"
 

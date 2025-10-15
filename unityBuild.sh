@@ -47,7 +47,7 @@ if [ -z "$UNITY_VERSION" ]; then
         export UNITY_VERSION="$DETECTED_VERSION"
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Auto-detected Unity version: $UNITY_VERSION"
     else
-        export UNITY_VERSION="6000.0.58f2"
+        export UNITY_VERSION="6000.2.7f2"
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Using default Unity version: $UNITY_VERSION"
     fi
 fi
@@ -501,6 +501,39 @@ build_android() {
     build_unity "Android" "Android" "$android_build_path/app.aab" "$PROFILE" "-buildAppBundle"
     
     log "Android Unity build completed. AAB file available at: $android_build_path/app.aab"
+    
+    # Offer to generate baseline profile for cold start optimization
+    if [ "$CI" != "true" ] && [ "$GENERATE_BASELINE_PROFILE" != "0" ]; then
+        log ""
+        log "📊 Baseline Profile Generation (Optional)"
+        log "This optimizes cold start time by ~15-30%"
+        log "Requires: Device connected via USB with app installed"
+        log ""
+        read -p "Generate baseline profile now? [y/N]: " -n 1 -r baseline_choice
+        echo ""
+        
+        case "$baseline_choice" in
+            y|Y)
+                if [ -f "$SCRIPT_DIR/generate-baseline-profile.sh" ]; then
+                    log "Starting baseline profile generation..."
+                    if "$SCRIPT_DIR/generate-baseline-profile.sh"; then
+                        log "✅ Baseline profile generated successfully"
+                        log "Next build will include this profile for faster cold start"
+                    else
+                        log "⚠️  Baseline profile generation failed"
+                        log "You can run it manually later: ./Scripts/generate-baseline-profile.sh"
+                    fi
+                else
+                    log "⚠️  Baseline profile script not found"
+                fi
+                ;;
+            *)
+                log "Skipping baseline profile generation"
+                log "You can generate it later with: ./Scripts/generate-baseline-profile.sh"
+                log "Or set GENERATE_BASELINE_PROFILE=1 in androidDeploy.sh"
+                ;;
+        esac
+    fi
     
     # Set environment variables for downstream processes
     export ANDROID_BUILD_FILE_PATH="$android_build_path/app.aab"
