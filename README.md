@@ -11,6 +11,46 @@ This is a reusable build and deployment system for Unity projects. The system us
 - **Modern**: Clean, maintainable scripts with proper error handling
 - **Reusable**: Designed as a git submodule for multiple projects
 - **CSV to S3**: Automated migration from Google Sheets to S3 + CloudFront
+- **Documentation Cleanup**: Enforces zero-tolerance policy for temporary docs
+
+---
+
+## 📝 Documentation Maintenance
+
+### Cleanup Tools
+
+**`cleanupTempDocs.sh`** - Remove temporary analysis/debug documentation
+```bash
+./Scripts/cleanupTempDocs.sh
+```
+Identifies and deletes temporary docs matching patterns:
+- `*_FIX_*.md`, `*_DEBUG_*.md`, `*_ANALYSIS*.md`
+- `*_PLAN.md`, `*_SUMMARY*.md`, `*_IMPLEMENTATION*.md`
+
+Keeps permanent references like:
+- `ARCHITECTURE_REFERENCE.md`
+- `Docs/ANDROID_BUILD_OPTIMIZATION_SUMMARY.md`
+- Specialized guides in `Docs/`
+
+**`pre-commit-docs-check.sh`** - Git pre-commit hook (optional)
+```bash
+# Install the hook
+cp Scripts/pre-commit-docs-check.sh .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+```
+Warns when attempting to commit temporary documentation files.
+
+### Documentation Policy
+
+**Zero-Tolerance for Temporary Docs:**
+- ❌ Don't create `*_FIX_*.md`, `*_ANALYSIS*.md` files
+- ✅ Use code comments for implementation details
+- ✅ Update `ARCHITECTURE_REFERENCE.md` for patterns
+- ✅ Write detailed git commit messages for history
+
+See `.github/copilot-instructions.md` for Copilot enforcement rules.
+
+---
 
 ## 📋 Quick Reference
 
