@@ -11,6 +11,18 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# Script configuration
+SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+
+# Load AWS credentials from .env file
+ENV_FILE="$SCRIPT_DIR/.env"
+if [ -f "$ENV_FILE" ]; then
+    export $(grep -v '^#' "$ENV_FILE" | xargs)
+    echo -e "${GREEN}✅ Loaded AWS credentials from .env${NC}"
+else
+    echo -e "${YELLOW}⚠️  .env file not found at $ENV_FILE${NC}"
+fi
+
 echo -e "${BLUE}======================================${NC}"
 echo -e "${BLUE} CSV Migration Test${NC}"
 echo -e "${BLUE}======================================${NC}"

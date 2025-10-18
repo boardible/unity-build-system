@@ -401,6 +401,11 @@ build_ios() {
     # Check if BoardDoctor should be run (unless already prompted in this session)
     if [ "$SKIP_BOARDDOCTOR_PROMPT" != "true" ]; then
         check_boarddoctor "iOS" "$PROFILE"
+        # If building both platforms, automatically skip Android prompt
+        if [ "$PLATFORM" = "both" ]; then
+            export SKIP_BOARDDOCTOR_PROMPT=true
+            log "Building both platforms - will skip BoardDoctor prompt for Android"
+        fi
     fi
     
     local ios_build_path="$BUILD_PATH/iOS"

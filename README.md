@@ -284,6 +284,49 @@ When updating Unity version:
 3. Update documentation
 4. Verify all packages still compatible
 
+## 🖥️ Self-Hosted Runners (Cost Optimization)
+
+Reduce CI/CD costs by 43% using self-hosted runners for Android builds!
+
+### Quick Start
+```powershell
+# On Windows PC - Get GitHub token helper
+.\Scripts\getRunnerToken.ps1
+
+# Run automated setup
+.\Scripts\setupSelfHostedRunner-Windows.ps1 -GitHubToken "YOUR_TOKEN"
+```
+
+### Documentation
+- **Quick Start**: `QUICK_START.md` - 5-minute setup guide
+- **Full Guide**: `SELF_HOSTED_RUNNER_SETUP.md` - Comprehensive instructions
+- **Checklist**: `SETUP_CHECKLIST.md` - Printable step-by-step checklist
+- **Summary**: `IMPLEMENTATION_SUMMARY.md` - Architecture and cost analysis
+
+### Cost Comparison
+| Setup | iOS Cost | Android Cost | Monthly Total |
+|-------|----------|--------------|---------------|
+| Cloud Only | $48-72 | $40-56 | **$88-128** |
+| Self-Hosted | $48-72 | **$0** | **$48-72** |
+| **Savings** | - | **100%** | **43%** |
+
+### Files
+- `setupSelfHostedRunner-Windows.ps1` - Automated Windows setup
+- `setupSelfHostedRunner-Linux.sh` - Automated Linux/WSL setup
+- `getRunnerToken.ps1` - Interactive token retrieval helper
+
+### Requirements
+- Windows 10/11 PC (or Linux with WSL)
+- Unity 6000.2.6f2 + Android Build Support
+- Administrator access
+- Stable internet connection
+
+After setup, update `.github/workflows/main.yml`:
+```yaml
+build_android:
+  runs-on: [self-hosted, windows, android]  # Instead of macos-latest
+```
+
 ## Support
 
 For issues with the build system:
@@ -291,3 +334,9 @@ For issues with the build system:
 2. Review error logs
 3. Test with minimal configuration
 4. Check Unity and platform-specific requirements
+
+For self-hosted runner issues:
+1. Check `SETUP_CHECKLIST.md` troubleshooting section
+2. Review runner logs: `C:\actions-runner\_diag\Runner_*.log`
+3. Verify service status: `Get-Service -Name "actions.runner.*"`
+4. See full guide in `SELF_HOSTED_RUNNER_SETUP.md`

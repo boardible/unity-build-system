@@ -12,6 +12,15 @@ SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 PROJECT_PATH="$(dirname "$SCRIPT_DIR")"
 TEMP_DIR="$PROJECT_PATH/.csv-temp"
 
+# Load AWS credentials from .env file
+ENV_FILE="$SCRIPT_DIR/.env"
+if [ -f "$ENV_FILE" ]; then
+    export $(grep -v '^#' "$ENV_FILE" | xargs)
+    echo "✅ Loaded AWS credentials from .env"
+else
+    echo "⚠️  .env file not found at $ENV_FILE"
+fi
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
