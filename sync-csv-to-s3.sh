@@ -12,38 +12,11 @@ SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 PROJECT_PATH="$(dirname "$SCRIPT_DIR")"
 TEMP_DIR="$PROJECT_PATH/.csv-temp"
 
+# Load common functions
+source "$SCRIPT_DIR/lib/common.sh"
+
 # Load AWS credentials from .env file
-ENV_FILE="$SCRIPT_DIR/.env"
-if [ -f "$ENV_FILE" ]; then
-    export $(grep -v '^#' "$ENV_FILE" | xargs)
-    echo "✅ Loaded AWS credentials from .env"
-else
-    echo "⚠️  .env file not found at $ENV_FILE"
-fi
-
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# Logging functions
-log_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
-}
-
-log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
-}
-
-log_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
-}
-
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
+load_aws_config "$SCRIPT_DIR/.env"
 
 # AWS Configuration
 AWS_S3_BUCKET="boardible-app"
@@ -52,18 +25,14 @@ AWS_PROFILE="${AWS_PROFILE:-}"  # Use profile if set, otherwise default
 CLOUDFRONT_DOMAIN=""  # Will be loaded from AWSDevInfos
 
 # Determine environment (dev or prod)
-ENVIRONMENT="${BUILD_ENV:-dev}"  # Default to dev if not set
 UPDATE_CONFIG=false  # Whether to update boardibleConfigs.json with CloudFront URLs
 
 # Parse arguments
+ENVIRONMENT="dev"  # Default
 while [ $# -gt 0 ]; do
     case $1 in
-        dev)
-            ENVIRONMENT="dev"
-            shift
-            ;;
-        prod)
-            ENVIRONMENT="prod"
+        dev|prod)
+            ENVIRONMENT=$(parse_environment "$1")
             shift
             ;;
         --update-config)
@@ -83,21 +52,20 @@ S3_PREFIX=""  # Will be set to: {s3Prefix}configs/$ENVIRONMENT
 CLOUDFRONT_DISTRIBUTION_ID=""  # Will be loaded from AWSDevInfos
 
 # Load CloudFront distribution ID from AWSDevInfos.asset
-load_aws_config() {
+load_s3_config() {
     local config_file="$PROJECT_PATH/Assets/Resources/boardibleConfigs.json"
     local aws_config="$PROJECT_PATH/AWSDevInfos.asset"
     
-    # Load s3Prefix from boardibleConfigs.json
+    # Load s3Prefix from boardibleConfigs.json using common library
     if [ -f "$config_file" ]; then
-        if command -v jq &> /dev/null; then
-            local s3_base=$(jq -r '.s3Prefix // "ineuj-app/"' "$config_file")
+        local s3_base=$(json_get "$config_file" ".s3Prefix")
+        if [ -n "$s3_base" ]; then
             S3_PREFIX="${s3_base}configs/$ENVIRONMENT"
-            log_info "S3 Prefix: $S3_PREFIX"
         else
-            # Fallback: hardcoded default
             S3_PREFIX="ineuj-app/configs/$ENVIRONMENT"
-            log_warn "jq not installed - using default S3 prefix"
+            log_warn "Using default S3 prefix"
         fi
+        log_info "S3 Prefix: $S3_PREFIX"
     else
         log_error "boardibleConfigs.json not found"
         exit 1
@@ -463,8 +431,8 @@ main() {
         fi
     fi
     
-    # Load AWS configuration
-    load_aws_config
+    # Load S3 and CloudFront configuration
+    load_s3_config
     
     # Load CSV sources from boardibleConfigs.json
     load_csv_sources

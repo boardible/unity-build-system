@@ -11,49 +11,25 @@
 
 set -e  # Exit on any error
 
-echo "========================================"
-echo " BoardDoctor Preprocessing"
-echo "========================================"
-echo ""
-
-# Parse environment argument (dev or prod)
-ENVIRONMENT="${1:-dev}"  # Default to dev if not specified
-if [ "$ENVIRONMENT" != "dev" ] && [ "$ENVIRONMENT" != "prod" ]; then
-    echo "❌ Error: Invalid environment '$ENVIRONMENT'. Must be 'dev' or 'prod'"
-    echo "Usage: $0 [dev|prod]"
-    exit 1
-fi
-
 # Get script directory and project paths
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 PROJECT_PATH="$(dirname "$SCRIPT_DIR")"
 
+# Load common functions
+source "$SCRIPT_DIR/lib/common.sh"
+
+# Print banner
+print_banner "BoardDoctor Preprocessing"
+
+# Parse environment argument (dev or prod)
+ENVIRONMENT=$(parse_environment "${1:-dev}")
+
 # Load project configuration if it exists
-if [ -f "$PROJECT_PATH/project-config.sh" ]; then
-    source "$PROJECT_PATH/project-config.sh"
-fi
+load_project_config "$PROJECT_PATH/project-config.sh"
 
-# Logging function
-log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
-}
-
-# Auto-detect Unity version from ProjectSettings/ProjectVersion.txt
-detect_unity_version() {
-    local version_file="$PROJECT_PATH/ProjectSettings/ProjectVersion.txt"
-    if [ -f "$version_file" ]; then
-        local detected_version=$(grep "m_EditorVersion:" "$version_file" | sed 's/m_EditorVersion: //' | tr -d '[:space:]')
-        if [ -n "$detected_version" ]; then
-            echo "$detected_version"
-            return 0
-        fi
-    fi
-    return 1
-}
-
-# Set Unity version
+# Set Unity version - auto-detect or use default
 if [ -z "$UNITY_VERSION" ]; then
-    DETECTED_VERSION=$(detect_unity_version)
+    DETECTED_VERSION=$(detect_unity_version "$PROJECT_PATH")
     if [ -n "$DETECTED_VERSION" ]; then
         export UNITY_VERSION="$DETECTED_VERSION"
         log "Auto-detected Unity version: $UNITY_VERSION"
@@ -63,28 +39,10 @@ if [ -z "$UNITY_VERSION" ]; then
     fi
 fi
 
-# Detect Unity path
-detect_unity_path() {
-    local version="$1"
-    local paths=(
-        "/Applications/Unity/Hub/Editor/$version/Unity.app/Contents/MacOS/Unity"
-        "/Applications/Unity/Unity.app/Contents/MacOS/Unity"
-        "$HOME/Applications/Unity/Hub/Editor/$version/Unity.app/Contents/MacOS/Unity"
-    )
-    
-    for path in "${paths[@]}"; do
-        if [ -f "$path" ]; then
-            echo "$path"
-            return 0
-        fi
-    done
-    
-    return 1
-}
-
-UNITY_PATH=$(detect_unity_path "$UNITY_VERSION")
+# Detect Unity path using common library
+UNITY_PATH=$(find_unity_path "$UNITY_VERSION")
 if [ -z "$UNITY_PATH" ]; then
-    echo "❌ Error: Unity $UNITY_VERSION not found."
+    log_error "Unity $UNITY_VERSION not found."
     echo "Please install Unity $UNITY_VERSION or update UNITY_VERSION in project-config.sh"
     exit 1
 fi
@@ -104,9 +62,9 @@ CSV_SYNC_SCRIPT="$SCRIPT_DIR/sync-csv-to-s3.sh"
 if [ -f "$CSV_SYNC_SCRIPT" ]; then
     log "Running CSV sync script for $ENVIRONMENT environment..."
     if bash "$CSV_SYNC_SCRIPT" "$ENVIRONMENT"; then
-        log "✅ CSV sync completed successfully"
+        log_success "CSV sync completed successfully"
     else
-        log "⚠️  CSV sync failed - continuing with existing CSVs"
+        log_warn "CSV sync failed - continuing with existing CSVs"
         # Don't exit, just warn - BoardDoctor can continue with cached CSVs
     fi
 else
