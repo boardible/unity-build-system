@@ -189,7 +189,7 @@ build_android:
 
 **Before** (line 36):
 ```yaml
-UNITY_VERSION: "6000.2.7f2"  # ❌ Wrong version
+UNITY_VERSION: "6000.2.12f1"  # ❌ Wrong version
 ```
 
 **After**:

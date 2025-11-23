@@ -58,7 +58,7 @@ runs-on: [self-hosted, windows, android]
 
 **Line 36** - Change from:
 ```yaml
-UNITY_VERSION: "6000.2.7f2"
+UNITY_VERSION: "6000.2.12f1"
 ```
 
 To:
