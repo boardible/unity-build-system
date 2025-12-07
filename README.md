@@ -101,7 +101,7 @@ Create a `project-config.sh` file in your project root:
 ```bash
 # Project Settings
 export PROJECT_NAME="YourGameName"
-export UNITY_VERSION="6000.0.58f2"
+export UNITY_VERSION="6000.2.14f1"
 
 # iOS Configuration  
 export IOS_APP_ID="com.yourcompany.yourgame"
@@ -231,7 +231,7 @@ See `CI-CD-ENVIRONMENT-VARIABLES.md` for complete documentation.
 
 **"Unity not found"**
 - Update `UNITY_PATH` in `unityBuild.sh`
-- Ensure Unity 6000.0.58f2 is installed
+- Ensure Unity 6000.2.14f1 is installed
 
 **"Missing environment variables"**
 - Check CI-CD-ENVIRONMENT-VARIABLES.md

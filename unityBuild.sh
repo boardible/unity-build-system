@@ -74,7 +74,7 @@ detect_unity_path() {
         fi
     done
     
-    # If exact match fails, try fuzzy match (e.g., 6000.0.58f2 -> 6000.0.58f*)
+    # If exact match fails, try fuzzy match (e.g., 6000.2.14f1 -> 6000.2.14f*)
     local major_version="${version%%.*}"  # Extract major version (e.g., "6000")
     local fuzzy_pattern="/Applications/Unity/Hub/Editor/${major_version}.*/Unity.app/Contents/MacOS/Unity"
     
