@@ -34,7 +34,7 @@ if [ -z "$UNITY_VERSION" ]; then
         export UNITY_VERSION="$DETECTED_VERSION"
         log "Auto-detected Unity version: $UNITY_VERSION"
     else
-        export UNITY_VERSION="6000.2.12f1"
+        export UNITY_VERSION="6000.2.14f1"
         log "Using default Unity version: $UNITY_VERSION"
     fi
 fi

@@ -47,7 +47,7 @@ if [ -z "$UNITY_VERSION" ]; then
         export UNITY_VERSION="$DETECTED_VERSION"
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Auto-detected Unity version: $UNITY_VERSION"
     else
-        export UNITY_VERSION="6000.2.12f1"
+        export UNITY_VERSION="6000.2.14f1"
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Using default Unity version: $UNITY_VERSION"
     fi
 fi
@@ -507,37 +507,28 @@ build_android() {
     
     log "Android Unity build completed. AAB file available at: $android_build_path/app.aab"
     
-    # Offer to generate baseline profile for cold start optimization
-    if [ "$CI" != "true" ] && [ "$GENERATE_BASELINE_PROFILE" != "0" ]; then
+    # Run Android test with baseline profile generation (MANDATORY for cold start optimization)
+    if [ "$CI" != "true" ] && [ "$SKIP_ANDROID_TEST" != "1" ]; then
         log ""
-        log "📊 Baseline Profile Generation (Optional)"
-        log "This optimizes cold start time by ~15-30%"
-        log "Requires: Device connected via USB with app installed"
+        log "📊 Android Test & Baseline Profile Generation"
+        log "This is MANDATORY - ensures optimal cold start time (~15-30% faster)"
         log ""
-        read -p "Generate baseline profile now? [y/N]: " -n 1 -r baseline_choice
-        echo ""
         
-        case "$baseline_choice" in
-            y|Y)
-                if [ -f "$SCRIPT_DIR/generate-baseline-profile.sh" ]; then
-                    log "Starting baseline profile generation..."
-                    if "$SCRIPT_DIR/generate-baseline-profile.sh"; then
-                        log "✅ Baseline profile generated successfully"
-                        log "Next build will include this profile for faster cold start"
-                    else
-                        log "⚠️  Baseline profile generation failed"
-                        log "You can run it manually later: ./Scripts/generate-baseline-profile.sh"
-                    fi
-                else
-                    log "⚠️  Baseline profile script not found"
-                fi
-                ;;
-            *)
-                log "Skipping baseline profile generation"
-                log "You can generate it later with: ./Scripts/generate-baseline-profile.sh"
-                log "Or set GENERATE_BASELINE_PROFILE=1 in androidDeploy.sh"
-                ;;
-        esac
+        if [ -f "$SCRIPT_DIR/testAndroid.sh" ]; then
+            log "Starting Android test with baseline profile..."
+            if "$SCRIPT_DIR/testAndroid.sh"; then
+                log "✅ Android test & baseline profile completed successfully"
+                log "Next build will include this profile for faster cold start"
+            else
+                log "⚠️  Android test failed"
+                log "You can run it manually: ./Scripts/testAndroid.sh"
+            fi
+        else
+            log "⚠️  testAndroid.sh not found"
+        fi
+    elif [ "$CI" = "true" ]; then
+        log "CI environment detected - skipping interactive baseline profile generation"
+        log "Run ./Scripts/testAndroid.sh manually after deployment for profiling"
     fi
     
     # Set environment variables for downstream processes
@@ -555,6 +546,8 @@ main() {
     PLATFORM=""
     RELEASE_MODE="development"
     PROFILE="dev"  # Default to dev profile
+    CLEAN_CACHE=false
+    RUN_AFTER_BUILD=false
     
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -571,13 +564,25 @@ main() {
                 PROFILE="prod"  # Automatically set prod profile for release builds
                 shift
                 ;;
+            --clean-cache)
+                CLEAN_CACHE=true
+                shift
+                ;;
+            --run)
+                RUN_AFTER_BUILD=true
+                shift
+                ;;
             --help)
-                echo "Usage: $0 --platform [ios|android|both] [--profile dev|prod] [--release]"
+                echo "Usage: $0 --platform [ios|android|both] [--profile dev|prod] [--release] [--clean-cache] [--run]"
                 echo ""
                 echo "Options:"
                 echo "  --platform           Target platform: ios, android, or both"
                 echo "  --profile            Build profile: dev or prod (default: dev, auto-set to prod with --release)"
                 echo "  --release            Build in release mode and use prod profile (default: development mode with dev profile)"
+                echo "  --clean-cache        Clear Unity caches before building (forces full recompile)"
+                echo "                       Clears: ScriptAssemblies, Bee, IL2CPP, build artifacts, DerivedData"
+                echo "  --run                Install and run on connected device/emulator after build (Android only)"
+                echo "                       Automatically uninstalls old version and installs fresh APK"
                 echo "  --help               Show this help message"
                 echo ""
                 echo "BoardDoctor Integration:"
@@ -611,6 +616,70 @@ main() {
         esac
     done
     
+    # Clean Unity caches if requested
+    if [ "$CLEAN_CACHE" = true ]; then
+        log "🧹 Cleaning Unity caches (--clean-cache)..."
+        
+        # Clean ScriptAssemblies (compiled C# code)
+        if [ -d "$PROJECT_PATH/Library/ScriptAssemblies" ]; then
+            rm -rf "$PROJECT_PATH/Library/ScriptAssemblies"
+            log "  ✓ Cleared Library/ScriptAssemblies"
+        fi
+        
+        # Clean Bee (incremental build cache)
+        if [ -d "$PROJECT_PATH/Library/Bee" ]; then
+            rm -rf "$PROJECT_PATH/Library/Bee"
+            log "  ✓ Cleared Library/Bee"
+        fi
+        
+        # Clean IL2CPP cache
+        if [ -d "$PROJECT_PATH/Library/Il2cppBuildCache" ]; then
+            rm -rf "$PROJECT_PATH/Library/Il2cppBuildCache"
+            log "  ✓ Cleared Library/Il2cppBuildCache"
+        fi
+        
+        # Clean build output folders
+        if [ -d "$PROJECT_PATH/build/Android" ]; then
+            rm -rf "$PROJECT_PATH/build/Android"
+            log "  ✓ Cleared build/Android"
+        fi
+        
+        if [ -d "$PROJECT_PATH/build/iOS" ]; then
+            rm -rf "$PROJECT_PATH/build/iOS"
+            log "  ✓ Cleared build/iOS"
+        fi
+        
+        # Clean Xcode DerivedData for this project
+        local derived_data_path="$HOME/Library/Developer/Xcode/DerivedData"
+        if [ -d "$derived_data_path" ]; then
+            # Find and delete folders matching Unity-iPhone pattern
+            local deleted_count=0
+            for dir in "$derived_data_path"/Unity-iPhone-*; do
+                if [ -d "$dir" ]; then
+                    rm -rf "$dir"
+                    deleted_count=$((deleted_count + 1))
+                fi
+            done
+            if [ $deleted_count -gt 0 ]; then
+                log "  ✓ Cleared $deleted_count Xcode DerivedData folder(s)"
+            fi
+        fi
+        
+        # Clean CocoaPods cache for this project
+        if [ -d "$PROJECT_PATH/build/iOS/Pods" ]; then
+            rm -rf "$PROJECT_PATH/build/iOS/Pods"
+            log "  ✓ Cleared iOS Pods folder"
+        fi
+        
+        # Clean Gradle cache for Android (project-specific)
+        if [ -d "$PROJECT_PATH/.gradle" ]; then
+            rm -rf "$PROJECT_PATH/.gradle"
+            log "  ✓ Cleared .gradle cache"
+        fi
+        
+        log "✅ All caches cleared - next build will be a full clean build"
+    fi
+    
     # Validate platform argument
     if [ -z "$PLATFORM" ]; then
         echo "Error: Platform not specified. Use --platform [ios|android|both]"
@@ -627,10 +696,18 @@ main() {
             ;;
         android)
             build_android
+            # Run on device/emulator if requested
+            if [ "$RUN_AFTER_BUILD" = true ]; then
+                run_android
+            fi
             ;;
         both)
             build_ios
             build_android
+            # Run on device/emulator if requested (Android only)
+            if [ "$RUN_AFTER_BUILD" = true ]; then
+                run_android
+            fi
             ;;
         *)
             echo "Error: Invalid platform '$PLATFORM'. Use ios, android, or both."
@@ -639,6 +716,119 @@ main() {
     esac
     
     log "=== Unity Build Script Completed Successfully ==="
+}
+
+# Function to install and run Android app on connected device/emulator
+run_android() {
+    log "=== Installing and Running on Android Device/Emulator ==="
+    
+    local aab_path="$BUILD_PATH/Android/app.aab"
+    local apks_path="/tmp/boardible_app.apks"
+    
+    # Check if AAB exists
+    if [ ! -f "$aab_path" ]; then
+        log "❌ Error: AAB file not found at $aab_path"
+        return 1
+    fi
+    
+    # Check if adb is available
+    if ! command -v adb &> /dev/null; then
+        log "❌ Error: adb not found. Please install Android SDK platform-tools."
+        return 1
+    fi
+    
+    # Check if bundletool is available
+    if ! command -v bundletool &> /dev/null; then
+        log "❌ Error: bundletool not found. Install with: brew install bundletool"
+        return 1
+    fi
+    
+    # Check for connected device/emulator
+    local device_count=$(adb devices | grep -v "List" | grep -c "device$" || echo "0")
+    if [ "$device_count" -eq 0 ]; then
+        log "⚠️  No Android device/emulator connected."
+        log "Attempting to launch an emulator..."
+        
+        # Try to find and launch an emulator
+        local emulator_name=$(emulator -list-avds 2>/dev/null | head -1)
+        if [ -n "$emulator_name" ]; then
+            log "Found emulator: $emulator_name"
+            log "Launching emulator (this may take a minute)..."
+            emulator -avd "$emulator_name" -no-snapshot-load &
+            
+            # Wait for emulator to boot (max 120 seconds)
+            log "Waiting for emulator to boot..."
+            local wait_time=0
+            while [ $wait_time -lt 120 ]; do
+                if adb shell getprop sys.boot_completed 2>/dev/null | grep -q "1"; then
+                    log "✅ Emulator booted successfully!"
+                    break
+                fi
+                sleep 5
+                wait_time=$((wait_time + 5))
+                log "Still waiting... ($wait_time/120 seconds)"
+            done
+            
+            if [ $wait_time -ge 120 ]; then
+                log "❌ Emulator boot timeout"
+                return 1
+            fi
+        else
+            log "❌ No emulators found. Please create one in Android Studio or connect a device."
+            return 1
+        fi
+    fi
+    
+    # Uninstall existing app (ignore errors if not installed)
+    log "Uninstalling existing app (if any)..."
+    adb uninstall "$ANDROID_PACKAGE_NAME" 2>/dev/null || true
+    
+    # Clear app data (extra cleanup)
+    adb shell pm clear "$ANDROID_PACKAGE_NAME" 2>/dev/null || true
+    
+    # Convert AAB to APKs using bundletool
+    log "Converting AAB to APKs..."
+    bundletool build-apks \
+        --bundle="$aab_path" \
+        --output="$apks_path" \
+        --mode=universal \
+        --overwrite
+    
+    if [ $? -ne 0 ]; then
+        log "❌ Failed to convert AAB to APKs"
+        return 1
+    fi
+    
+    # Install APKs
+    log "Installing APKs on device..."
+    bundletool install-apks --apks="$apks_path"
+    
+    if [ $? -ne 0 ]; then
+        log "❌ Failed to install APKs"
+        return 1
+    fi
+    
+    # Verify installation
+    local install_time=$(adb shell pm dump "$ANDROID_PACKAGE_NAME" 2>/dev/null | grep "lastUpdateTime" | head -1)
+    log "✅ App installed successfully!"
+    log "   $install_time"
+    
+    # Launch the app
+    log "Launching app..."
+    adb shell monkey -p "$ANDROID_PACKAGE_NAME" -c android.intent.category.LAUNCHER 1
+    
+    log "✅ App launched! Check the device/emulator."
+    log ""
+    log "📱 To view logs in real-time:"
+    log "   adb logcat -s Unity | grep -E 'DEBUG-BOOT|AppState|AppCore'"
+    log ""
+    log "📱 To clear logs and start fresh:"
+    log "   adb logcat -c && adb logcat -s Unity"
+    
+    # Clean up temp files
+    rm -f "$apks_path"
+    
+    return 0
 }
 
 # Run main function with all arguments
