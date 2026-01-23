@@ -73,13 +73,20 @@ echo ""
 # Detect current project
 detect_project() {
     local proj_root="$1"
-    if grep -q "Tictac" "$proj_root/ProjectSettings/ProjectSettings.asset" 2>/dev/null; then
-        echo "tictac"
-    elif grep -q "boardgames" "$proj_root/ProjectSettings/ProjectSettings.asset" 2>/dev/null; then
-        echo "boardgames"
-    else
-        echo "ineuj"
-    fi
+    # Check by folder name first (most reliable)
+    local folder_name=$(basename "$proj_root")
+    case "$folder_name" in
+        tictac|Tictac) echo "tictac"; return ;;
+        boardgames|Boardgames) echo "boardgames"; return ;;
+        ineuj|Ineuj) echo "ineuj"; return ;;
+    esac
+    # Fallback: check ProductName in ProjectSettings
+    local product_name=$(grep "productName:" "$proj_root/ProjectSettings/ProjectSettings.asset" 2>/dev/null | head -1 | sed 's/.*productName: //')
+    case "$product_name" in
+        *Tictac*|*TicTac*|*Monstic*) echo "tictac" ;;
+        *Boardible*|*boardible*) echo "boardgames" ;;
+        *) echo "ineuj" ;;
+    esac
 }
 
 CURRENT_PROJECT=$(detect_project "$PROJECT_ROOT")
