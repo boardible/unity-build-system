@@ -4,6 +4,10 @@
 # Shared functions for Unity build, CSV sync, and deployment scripts
 # Compatible with bash 3.2+ (macOS default)
 
+# Add common paths to PATH to ensure tools like aws, jq, unity are found
+# This is critical when running from Unity Editor or CI environments
+export PATH="$PATH:/usr/local/bin:/opt/homebrew/bin:/opt/local/bin"
+
 # Color definitions
 export RED='\033[0;31m'
 export GREEN='\033[0;32m'
