@@ -39,10 +39,15 @@ patch_quality_settings() {
     # Patch asyncUploadTimeSlice for smoother loading (reduce from 10 to 4)
     sed -i '' 's/asyncUploadTimeSlice: 10/asyncUploadTimeSlice: 4/g' "$quality_file"
     sed -i '' 's/asyncUploadTimeSlice: 8/asyncUploadTimeSlice: 4/g' "$quality_file"
+    sed -i '' 's/asyncUploadTimeSlice: 6/asyncUploadTimeSlice: 4/g' "$quality_file"
+    
+    # Enable streaming mipmaps for better memory management
+    sed -i '' 's/streamingMipmapsActive: 0/streamingMipmapsActive: 1/g' "$quality_file"
     
     echo "✓ Patched vSyncCount to 0"
     echo "✓ Patched shadows to disabled"
     echo "✓ Patched asyncUploadTimeSlice to 4"
+    echo "✓ Enabled streamingMipmapsActive"
     echo "Backup saved at: $quality_file.backup"
     
     return 0
