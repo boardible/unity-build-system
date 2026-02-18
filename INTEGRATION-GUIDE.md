@@ -39,7 +39,7 @@ nano project-config.sh
 ```bash
 # Project Settings
 export PROJECT_NAME="MyAwesomeGame"
-export UNITY_VERSION="6000.2.14f1"
+export UNITY_VERSION="6000.3.7f1"
 
 # iOS Configuration  
 export IOS_APP_ID="com.mycompany.awesomegame"

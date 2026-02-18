@@ -40,7 +40,7 @@
 
 ### 3. **Updated Workflow File**
 
-✅ Fixed Unity version: `6000.2.14f1` → `6000.2.6f2`
+✅ Fixed Unity version: `6000.3.7f1` → `6000.2.6f2`
 ✅ Added TODO comment for self-hosted runner migration
 ✅ Maintained backward compatibility (still uses macOS until runner is set up)
 
@@ -142,7 +142,7 @@
 ```yaml
 # Before
 env:
-  UNITY_VERSION: "6000.2.14f1"  # ❌ Wrong version
+  UNITY_VERSION: "6000.3.7f1"  # ❌ Wrong version
 
 build_android:
   runs-on: macos-latest  # ❌ Expensive

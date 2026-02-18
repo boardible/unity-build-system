@@ -27,7 +27,7 @@ echo ""
 
 # Run Unity command to test the PodfileManager
 echo "Running Unity test..."
-/Applications/Unity/Hub/Editor/6000.2.14f1/Unity.app/Contents/MacOS/Unity \
+/Applications/Unity/Hub/Editor/6000.3.7f1/Unity.app/Contents/MacOS/Unity \
   -quit \
   -batchmode \
   -nographics \

@@ -6,7 +6,7 @@
 set -e
 
 FACEBOOK_VERSION=${1:-"18.0.0"}
-UNITY_PATH=${2:-"/Applications/Unity/Hub/Editor/6000.2.14f1/Unity.app/Contents/MacOS/Unity"}
+UNITY_PATH=${2:-"/Applications/Unity/Hub/Editor/6000.3.7f1/Unity.app/Contents/MacOS/Unity"}
 PROJECT_PATH=${3:-"/Users/pedromartinez/Dev/ineuj"}
 
 DOWNLOAD_URL="https://github.com/facebook/facebook-sdk-for-unity/releases/download/sdk-version-${FACEBOOK_VERSION}/facebook-unity-sdk-${FACEBOOK_VERSION}.zip"
