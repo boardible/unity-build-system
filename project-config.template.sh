@@ -20,10 +20,17 @@ export BUILD_OUTPUT_PATH="build"
 # CI/CD Settings
 export DEPLOY_TRACK="production"  # For Android: internal, alpha, beta, production
 
-# Optional: Override default artifact names
-# export IOS_ARTIFACT_NAME="ios-build"
-# export ANDROID_ARTIFACT_NAME="android-build"
+# BoardDoctor Settings
+export BOARD_DOCTOR_URL="https://api.boardible.com/board-doctor"
+export BOARD_DOCTOR_TOKEN=""  # Set via environment or CI secrets
 
-# Optional: Custom build arguments
-# export UNITY_BUILD_ARGS=""
-# export FASTLANE_ENV="default"
+# CSV Sync Settings
+export CSV_SYNC_ENABLED="true"
+export S3_BUCKET="your-csv-bucket"
+export CLOUDFRONT_DOMAIN="csv.yourcompany.com"
+
+# Remote Addressables Settings
+# Set REMOTE_ADDRESSABLES_ENABLED=true only for projects that host Addressables on a CDN
+export REMOTE_ADDRESSABLES_ENABLED="false"
+# export ADDRESSABLES_S3_PATH="s3://your-cdn-bucket/addressables_test"  # Required when enabled
+# export ADDRESSABLES_CLOUDFRONT_DISTRIBUTION_ID=""                     # Set via environment or CI secrets

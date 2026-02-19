@@ -145,14 +145,12 @@ else
     bundle exec fastlane android playprod
 fi
 
-# Upload Addressables (if script exists)
-ADDRESSABLES_SCRIPT="$SCRIPT_DIR/uploadAddressables-android.sh"
-if [ -f "$ADDRESSABLES_SCRIPT" ]; then
-    log "Uploading Addressables..."
-    source "$ADDRESSABLES_SCRIPT"
+# Upload Addressables to CDN (only when REMOTE_ADDRESSABLES_ENABLED=true in project-config.sh)
+if [ "${REMOTE_ADDRESSABLES_ENABLED:-false}" = "true" ]; then
+    log "Uploading Addressables to CDN..."
+    "$SCRIPT_DIR/uploadAddressables.sh" android
 else
-    log "Warning: Addressables upload script not found: $ADDRESSABLES_SCRIPT"
-    log "Skipping Addressables upload"
+    log "Skipping Addressables upload (REMOTE_ADDRESSABLES_ENABLED is not true)"
 fi
 
 # Note: Temporary service account file cleanup is handled by trap on EXIT

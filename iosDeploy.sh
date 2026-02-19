@@ -157,5 +157,13 @@ cleanup_cocoapods_repos
 log "Deploying to TestFlight..."
 bundle exec fastlane ios beta
 
+# Upload Addressables to CDN (only when REMOTE_ADDRESSABLES_ENABLED=true in project-config.sh)
+if [ "${REMOTE_ADDRESSABLES_ENABLED:-false}" = "true" ]; then
+    log "Uploading Addressables to CDN..."
+    "$SCRIPT_DIR/uploadAddressables.sh" ios
+else
+    log "Skipping Addressables upload (REMOTE_ADDRESSABLES_ENABLED is not true)"
+fi
+
 log "iOS deployment completed successfully"
 exit 0
