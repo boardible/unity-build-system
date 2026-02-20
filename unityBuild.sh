@@ -538,7 +538,15 @@ build_android() {
     export ANDROID_KEYSTORE_PASS
     export ANDROID_KEY_ALIAS
     export ANDROID_KEY_PASS
-    
+
+    # Ensure google-services.json is at Assets/ root (Firebase Gradle plugin requires it there)
+    local gs_src="$PROJECT_PATH/Assets/Plugins/Android/google-services.json"
+    local gs_dst="$PROJECT_PATH/Assets/google-services.json"
+    if [ -f "$gs_src" ] && [ ! -f "$gs_dst" ]; then
+        cp "$gs_src" "$gs_dst"
+        log "Copied google-services.json to Assets/ for Firebase Gradle plugin"
+    fi
+
     # Build Unity Android project (now includes BoardDoctor + Addressables + Build in single session)
     build_unity "Android" "Android" "$android_build_path/app.aab" "$PROFILE" "-buildAppBundle"
     
