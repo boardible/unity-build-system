@@ -7,8 +7,8 @@
 
 set -e
 
-INEUJ_DIR="/Users/pedromartinez/Dev/ineuj"
-TICTAC_DIR="/Users/pedromartinez/Dev/tictac"
+INEUJ_DIR="/Users/pedromartinez/Dev/bdb/ineuj"
+TICTAC_DIR="/Users/pedromartinez/Dev/bdb/tictac"
 
 echo "========================================"
 echo "Applying ineuj settings to tictac"
@@ -127,7 +127,7 @@ fi
 python3 << 'PYEOF'
 import re
 
-link_xml_path = "/Users/pedromartinez/Dev/tictac/Assets/link.xml"
+link_xml_path = "/Users/pedromartinez/Dev/bdb/tictac/Assets/link.xml"
 
 with open(link_xml_path, 'r') as f:
     content = f.read()

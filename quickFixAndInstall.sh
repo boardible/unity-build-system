@@ -5,7 +5,7 @@
 
 set -e
 
-PROJECT_PATH="/Users/pedromartinez/Dev/ineuj"
+PROJECT_PATH="/Users/pedromartinez/Dev/bdb/ineuj"
 FACEBOOK_CS="$PROJECT_PATH/Assets/Commons/Runtime/Services/AppFacebook.cs"
 
 # Colors

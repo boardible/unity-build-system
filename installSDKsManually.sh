@@ -8,7 +8,7 @@ set -e
 
 FIREBASE_VERSION="13.3.0"
 FACEBOOK_VERSION="18.0.0"
-PROJECT_PATH="/Users/pedromartinez/Dev/ineuj"
+PROJECT_PATH="/Users/pedromartinez/Dev/bdb/ineuj"
 
 # Color codes
 RED='\033[0;31m'

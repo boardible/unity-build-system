@@ -61,7 +61,13 @@ log "=== Step 1: Syncing CSVs to S3 ($ENVIRONMENT) ==="
 CSV_SYNC_SCRIPT="$SCRIPT_DIR/sync-csv-to-s3.sh"
 if [ -f "$CSV_SYNC_SCRIPT" ]; then
     log "Running CSV sync script for $ENVIRONMENT environment..."
-    if bash "$CSV_SYNC_SCRIPT" "$ENVIRONMENT"; then
+    # For prod, also update boardibleConfigs.json URLs to point to prod CloudFront paths
+    SYNC_ARGS="$ENVIRONMENT"
+    if [ "$ENVIRONMENT" = "prod" ]; then
+        SYNC_ARGS="$ENVIRONMENT --update-config"
+        log "Production build: will update boardibleConfigs.json URLs to prod CloudFront paths"
+    fi
+    if bash "$CSV_SYNC_SCRIPT" $SYNC_ARGS; then
         log_success "CSV sync completed successfully"
     else
         log_warn "CSV sync failed - continuing with existing CSVs"

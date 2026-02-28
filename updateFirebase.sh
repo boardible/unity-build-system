@@ -7,7 +7,7 @@ set -e
 
 FIREBASE_VERSION=${1:-"13.3.0"}
 UNITY_PATH=${2:-"/Applications/Unity/Hub/Editor/6000.3.7f1/Unity.app/Contents/MacOS/Unity"}
-PROJECT_PATH=${3:-"/Users/pedromartinez/Dev/ineuj"}
+PROJECT_PATH=${3:-"/Users/pedromartinez/Dev/bdb/ineuj"}
 
 # Minimum supported Firebase version
 MIN_FIREBASE_VERSION="13.0.0"
