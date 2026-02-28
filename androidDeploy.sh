@@ -93,8 +93,21 @@ if [ -z "$ANDROID_BUILD_MAPPING_PATH" ]; then
     export ANDROID_BUILD_MAPPING_PATH="$ANDROID_BUILD_PATH/mapping.txt"
 fi
 
+# Extract version from Unity ProjectSettings — single source of truth
+# Ensures Play Console release labels always match the versionName baked into the AAB
+UNITY_SETTINGS="$PROJECT_PATH/ProjectSettings/ProjectSettings.asset"
+if [ -f "$UNITY_SETTINGS" ]; then
+    _BUNDLE_VERSION=$(grep "bundleVersion:" "$UNITY_SETTINGS" | sed 's/.*bundleVersion: //' | tr -d ' \r')
+    _BUILD_NUMBER=$(grep "AndroidBundleVersionCode:" "$UNITY_SETTINGS" | sed 's/.*AndroidBundleVersionCode: //' | tr -d ' \r')
+    export APP_VERSION="${APP_VERSION:-$_BUNDLE_VERSION}"
+    export APP_BUILD_NUMBER="${APP_BUILD_NUMBER:-$_BUILD_NUMBER}"
+else
+    log "Warning: ProjectSettings.asset not found — APP_VERSION/APP_BUILD_NUMBER must be set manually"
+fi
+
 log "Environment variables configured successfully"
 log "Package Name: $ANDROID_PACKAGE_NAME"
+log "App Version: $APP_VERSION (build $APP_BUILD_NUMBER)"
 log "Build File: $ANDROID_BUILD_FILE_PATH"
 log "Mapping File: $ANDROID_BUILD_MAPPING_PATH"
 

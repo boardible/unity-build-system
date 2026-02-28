@@ -129,6 +129,16 @@ log "iOS App ID: $IOS_APP_ID"
 log "Build Path: $IOS_BUILD_PATH"
 log "Derived Data Path: $DERIVED_DATA_PATH"
 
+# Extract version from Unity ProjectSettings — single source of truth
+UNITY_SETTINGS="$PROJECT_PATH/ProjectSettings/ProjectSettings.asset"
+if [ -f "$UNITY_SETTINGS" ]; then
+    _BUNDLE_VERSION=$(grep "bundleVersion:" "$UNITY_SETTINGS" | sed 's/.*bundleVersion: //' | tr -d ' \r')
+    export APP_VERSION="${APP_VERSION:-$_BUNDLE_VERSION}"
+else
+    log "Warning: ProjectSettings.asset not found — APP_VERSION must be set manually"
+fi
+log "App Version: $APP_VERSION"
+
 # Navigate to project root for Fastlane
 cd "$PROJECT_PATH"
 
