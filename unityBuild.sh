@@ -113,6 +113,76 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
 }
 
+run_unity_with_followed_log() {
+    local log_file="$1"
+    shift
+
+    : > "$log_file"
+
+    # Let Unity own the log file directly. Streaming that file avoids the
+    # stdout/stderr pipe path that has intermittently failed during Android
+    # ModifyAndroidProjectCallback with a sharing violation on "[Unknown]".
+    tail -n +1 -F "$log_file" &
+    local tail_pid=$!
+
+    set +e
+    "$@" -logFile "$log_file"
+    local exit_code=$?
+    set -e
+
+    kill "$tail_pid" >/dev/null 2>&1 || true
+    wait "$tail_pid" 2>/dev/null || true
+
+    return $exit_code
+}
+
+ensure_project_not_open_in_unity() {
+    local unity_processes
+    unity_processes=$(pgrep -af "Unity.app/Contents/MacOS/Unity" | grep -- "-projectPath $PROJECT_PATH" || true)
+
+    if [ -n "$unity_processes" ]; then
+        log "❌ Another Unity instance already has this project open:"
+        echo "$unity_processes"
+        log "Close the Unity editor for $PROJECT_PATH, then rerun the script."
+        exit 1
+    fi
+}
+
+report_unity_package_registration_failure() {
+    local log_file="$1"
+
+    if [ ! -f "$log_file" ]; then
+        return 1
+    fi
+
+    if ! grep -Fq "[Package Manager] Registered 0 packages:" "$log_file"; then
+        return 1
+    fi
+
+    if ! grep -Fq "[Package Manager] The following packages were not registered because your license doesn't allow it." "$log_file"; then
+        return 1
+    fi
+
+    log ""
+    log "Unity batchmode failed before package-dependent assemblies were available."
+
+    if grep -Fq "[Licensing::Module] Error: 'com.unity.editor.headless' was not found." "$log_file"; then
+        log "Root cause: Unity lost the headless licensing entitlement, so Package Manager registered 0 packages."
+    else
+        log "Root cause: Unity Package Manager registered 0 packages during startup."
+    fi
+
+    log "This makes package symbols like UniTask, TextMeshPro, UGUI, Purchasing, and Newtonsoft look missing."
+    log "Recovery steps:"
+    log "  1. Quit all Unity editors and Unity Hub."
+    log "  2. Kill any stuck Unity.Licensing.Client and UnityPackageManager processes."
+    log "  3. Reopen Unity Hub, sign in again if needed, and open this project once in the editor."
+    log "  4. Close the editor and rerun the build."
+    log "If it still fails, retry from an active desktop session without -nographics as a local workaround."
+
+    return 0
+}
+
 detect_logical_cpu_count() {
     local cpu_count
     cpu_count=$(sysctl -n hw.logicalcpu 2>/dev/null || true)
@@ -325,18 +395,16 @@ build_unity() {
     if [ ${#unity_runtime_args[@]} -gt 0 ]; then
         unity_cmd+=" ${unity_runtime_args[*]}"
     fi
-    # Include the Hub flags we actually pass
-    unity_cmd+=" -useHub -hubIPC"
     
     log "Executing Unity build command..."
     log "Command: $unity_cmd"
+    ensure_project_not_open_in_unity
     
     # Execute Unity build with real-time output and log file
     local log_file="$LOGS_PATH/unity-build-$platform-$(date +%Y%m%d-%H%M%S).log"
     
-    # Run Unity directly without eval for security
-    # -useHub -hubIPC: required for Hub-based license resolution when launched outside Hub
-    "$UNITY_PATH" -batchmode -nographics -useHub -hubIPC \
+    run_unity_with_followed_log "$log_file" \
+        "$UNITY_PATH" -batchmode -nographics \
         -projectPath "$PROJECT_PATH" \
         -buildTarget "$build_target" \
         -buildPath "$output_path" \
@@ -344,9 +412,8 @@ build_unity() {
         -executeMethod "BuildScript.$method_name" \
         -profile "$profile" \
         -stackTraceLogType None \
-        $additional_args \
-        2>&1 | tee "$log_file"
-    local exit_code=${PIPESTATUS[0]}
+        $additional_args
+    local exit_code=$?
     
     if [ $exit_code -eq 0 ]; then
         log "Unity build for $platform completed successfully"
@@ -354,6 +421,7 @@ build_unity() {
     else
         log "Unity build for $platform failed with exit code $exit_code"
         log "Check log file: $log_file"
+        report_unity_package_registration_failure "$log_file" || true
         log "Last 20 lines of build log:"
         tail -20 "$log_file" 2>/dev/null || echo "Could not read log file"
         exit $exit_code
@@ -370,20 +438,32 @@ build_addressables() {
     
     log "Building Addressables for $platform..."
     
-    local log_file="$LOGS_PATH/addressables-build-$platform-$(date +%Y%m%d-%H%M%S).log"
-    log "Command: $UNITY_PATH -batchmode -nographics -useHub -hubIPC -projectPath $PROJECT_PATH -executeMethod BuildScript.BuildAddressables -buildTarget $platform -stackTraceLogType None ${unity_runtime_args[*]:-}"
-    log "Building Addressables..."
+    # Unity command WITHOUT -quit (BuildScript.cs handles exit via EditorApplication.Exit)
+    local unity_cmd="$UNITY_PATH"
+    # NOTE: -quit removed because BuildScript.cs calls EditorApplication.Exit() manually
+    unity_cmd+=" -batchmode"
+    unity_cmd+=" -nographics"
+    unity_cmd+=" -projectPath $PROJECT_PATH"
+    unity_cmd+=" -executeMethod BuildScript.BuildAddressables"
+    unity_cmd+=" -buildTarget $platform"
+    unity_cmd+=" -stackTraceLogType None"
+
+    if [ ${#unity_runtime_args[@]} -gt 0 ]; then
+        unity_cmd+=" ${unity_runtime_args[*]}"
+    fi
     
-    # Run Unity directly without eval for security
-    # -useHub -hubIPC: required for Hub-based license resolution when launched outside Hub
-    "$UNITY_PATH" -batchmode -nographics -useHub -hubIPC \
+    log "Building Addressables..."
+    ensure_project_not_open_in_unity
+    local log_file="$LOGS_PATH/addressables-build-$platform-$(date +%Y%m%d-%H%M%S).log"
+    
+    run_unity_with_followed_log "$log_file" \
+        "$UNITY_PATH" -batchmode -nographics \
         -projectPath "$PROJECT_PATH" \
         -executeMethod "BuildScript.BuildAddressables" \
         -buildTarget "$platform" \
         "${unity_runtime_args[@]}" \
-        -stackTraceLogType None \
-        2>&1 | tee "$log_file"
-    local exit_code=${PIPESTATUS[0]}
+        -stackTraceLogType None
+    local exit_code=$?
     
     if [ $exit_code -eq 0 ]; then
         log "Addressables build for $platform completed successfully"
@@ -391,6 +471,7 @@ build_addressables() {
     else
         log "Addressables build for $platform failed with exit code $exit_code"
         log "Check log file: $log_file"
+        report_unity_package_registration_failure "$log_file" || true
         exit $exit_code
     fi
 }
@@ -557,7 +638,24 @@ build_ios() {
     build_unity "iOS" "iOS" "$ios_build_path" "$PROFILE"
     
     log "iOS Unity build completed. Xcode project available at: $ios_build_path"
-    
+
+    # SAFETY NET: Fix duplicate session.o stub in libvivoxsdk.a (Vivox 16.9.0 packaging bug)
+    # The archive contains two session.o entries: a stub (~800b) that appears first and
+    # the real implementation (~720KB). The stub wins the linker race causing "could not
+    # find symbol" errors. We remove the first (stub) copy, keeping only the real one.
+    local vivox_lib="$PROJECT_PATH/Library/PackageCache/com.unity.services.vivox@50e29f26efd1/Plugins/iOS/libvivoxsdk.a"
+    if [ -f "$vivox_lib" ]; then
+        local dupe_count
+        dupe_count=$(ar -tv "$vivox_lib" 2>/dev/null | awk '{print $NF}' | sort | uniq -d | grep -c "^session\.o$" || true)
+        if [ "$dupe_count" -gt 0 ]; then
+            log "⚠️  Vivox libvivoxsdk.a has duplicate session.o (packaging bug) — removing stub..."
+            ar d "$vivox_lib" session.o
+            log "✓ Vivox libvivoxsdk.a fixed (stub session.o removed)"
+        else
+            log "✓ Vivox libvivoxsdk.a OK (no duplicate session.o)"
+        fi
+    fi
+
     # SAFETY NET: Clean up duplicate CocoaPods sources in Podfile
     # This ensures Podfile only has ONE source line (GitHub Specs) before pod install
     # The CDN source is deprecated and causes builds to hang
@@ -690,7 +788,7 @@ build_android() {
     
     # Set environment variables for downstream processes
     export ANDROID_BUILD_FILE_PATH="$android_build_path/app.aab"
-    export ANDROID_BUILD_MAPPING_PATH="$android_build_path/mapping.txt"
+    export ANDROID_BUILD_MAPPING_PATH="$android_build_path/app_mapping.txt"
 }
 
 # Main script logic

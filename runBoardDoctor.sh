@@ -52,6 +52,76 @@ log "Environment: $ENVIRONMENT"
 log "Project Path: $PROJECT_PATH"
 log "Unity Path: $UNITY_PATH"
 
+run_unity_with_followed_log() {
+    local log_file="$1"
+    shift
+
+    : > "$log_file"
+
+    # Let Unity write its own log file and stream that file, instead of piping
+    # Unity stdout through tee. This avoids the console stream path that has
+    # intermittently failed during Android project modification.
+    tail -n +1 -F "$log_file" &
+    local tail_pid=$!
+
+    set +e
+    "$@" -logFile "$log_file"
+    local exit_code=$?
+    set -e
+
+    kill "$tail_pid" >/dev/null 2>&1 || true
+    wait "$tail_pid" 2>/dev/null || true
+
+    return $exit_code
+}
+
+ensure_project_not_open_in_unity() {
+    local unity_processes
+    unity_processes=$(pgrep -af "Unity.app/Contents/MacOS/Unity" | grep -- "-projectPath $PROJECT_PATH" || true)
+
+    if [ -n "$unity_processes" ]; then
+        log "❌ Another Unity instance already has this project open:"
+        echo "$unity_processes"
+        log "Close the Unity editor for $PROJECT_PATH, then rerun BoardDoctor."
+        exit 1
+    fi
+}
+
+report_unity_package_registration_failure() {
+    local log_file="$1"
+
+    if [ ! -f "$log_file" ]; then
+        return 1
+    fi
+
+    if ! grep -Fq "[Package Manager] Registered 0 packages:" "$log_file"; then
+        return 1
+    fi
+
+    if ! grep -Fq "[Package Manager] The following packages were not registered because your license doesn't allow it." "$log_file"; then
+        return 1
+    fi
+
+    log ""
+    log "Unity batchmode failed before BoardDoctor started."
+
+    if grep -Fq "[Licensing::Module] Error: 'com.unity.editor.headless' was not found." "$log_file"; then
+        log "Root cause: Unity lost the headless licensing entitlement, so Package Manager registered 0 packages."
+    else
+        log "Root cause: Unity Package Manager registered 0 packages during startup."
+    fi
+
+    log "This makes package types like UniTask, TextMeshPro, UGUI, Purchasing, and Newtonsoft disappear."
+    log "Recovery steps:"
+    log "  1. Quit all Unity editors and Unity Hub."
+    log "  2. Kill any stuck Unity.Licensing.Client and UnityPackageManager processes."
+    log "  3. Reopen Unity Hub, sign in again if needed, and open this project once in the editor."
+    log "  4. Retry BoardDoctor."
+    log "If it still fails, try the rerun from an active desktop session without -nographics as a local workaround."
+
+    return 0
+}
+
 # Create logs directory
 LOGS_PATH="$PROJECT_PATH/Logs"
 mkdir -p "$LOGS_PATH"
@@ -80,15 +150,6 @@ fi
 log ""
 
 # Step 2: Execute Unity BoardDoctor
-# Unity command WITHOUT -quit (BuildScript.cs handles exit via EditorApplication.Exit)
-unity_cmd="$UNITY_PATH"
-# NOTE: -quit removed because BuildScript.RunBoardDoctor() calls EditorApplication.Exit() manually
-unity_cmd+=" -batchmode"
-unity_cmd+=" -nographics"
-unity_cmd+=" -projectPath $PROJECT_PATH"
-unity_cmd+=" -executeMethod BuildScript.RunBoardDoctor"
-unity_cmd+=" -stackTraceLogType None"
-
 log "=== Step 2: Executing Unity BoardDoctor ==="
 log "This will refresh:"
 log "  - Localization files"
@@ -98,11 +159,16 @@ log "  - Exchange rates"
 log "  - Visual effects data"
 log "  - Game data from CSV sources"
 log ""
+ensure_project_not_open_in_unity
 
 # Execute BoardDoctor with real-time output
 log_file="$LOGS_PATH/unity-boarddoctor-$(date +%Y%m%d-%H%M%S).log"
-eval "$unity_cmd" 2>&1 | tee "$log_file"
-exit_code=${PIPESTATUS[0]}
+run_unity_with_followed_log "$log_file" \
+    "$UNITY_PATH" -batchmode -nographics -useHub -hubIPC \
+    -projectPath "$PROJECT_PATH" \
+    -executeMethod "BuildScript.RunBoardDoctor" \
+    -stackTraceLogType None
+exit_code=$?
 
 if [ $exit_code -eq 0 ]; then
     log "✅ BoardDoctor completed successfully"
@@ -110,6 +176,7 @@ if [ $exit_code -eq 0 ]; then
 else
     log "❌ BoardDoctor failed with exit code $exit_code"
     log "Check log file: $log_file"
+    report_unity_package_registration_failure "$log_file" || true
     log "Last 20 lines of log:"
     tail -20 "$log_file" 2>/dev/null || echo "Could not read log file"
     exit $exit_code

@@ -30,7 +30,7 @@ export S3_BUCKET="your-csv-bucket"
 export CLOUDFRONT_DOMAIN="csv.yourcompany.com"
 
 # Remote Addressables Settings
-# Set REMOTE_ADDRESSABLES_ENABLED=true only for projects that host Addressables on a CDN
+# Set to true for projects that host Addressables bundles on a CDN (S3 + CloudFront)
 export REMOTE_ADDRESSABLES_ENABLED="false"
-# export ADDRESSABLES_S3_PATH="s3://your-cdn-bucket/addressables_test"  # Required when enabled
-# export ADDRESSABLES_CLOUDFRONT_DISTRIBUTION_ID=""                     # Set via environment or CI secrets
+export ADDRESSABLES_S3_PATH="s3://your-cdn-bucket/addressables_test"    # Required when enabled
+export ADDRESSABLES_CLOUDFRONT_DISTRIBUTION_ID=""                       # Set via environment or CI secrets
