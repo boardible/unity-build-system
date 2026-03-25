@@ -325,6 +325,8 @@ build_unity() {
     if [ ${#unity_runtime_args[@]} -gt 0 ]; then
         unity_cmd+=" ${unity_runtime_args[*]}"
     fi
+    # Include the Hub flags we actually pass
+    unity_cmd+=" -useHub -hubIPC"
     
     log "Executing Unity build command..."
     log "Command: $unity_cmd"
@@ -368,22 +370,9 @@ build_addressables() {
     
     log "Building Addressables for $platform..."
     
-    # Unity command WITHOUT -quit (BuildScript.cs handles exit via EditorApplication.Exit)
-    local unity_cmd="$UNITY_PATH"
-    # NOTE: -quit removed because BuildScript.cs calls EditorApplication.Exit() manually
-    unity_cmd+=" -batchmode"
-    unity_cmd+=" -nographics"
-    unity_cmd+=" -projectPath $PROJECT_PATH"
-    unity_cmd+=" -executeMethod BuildScript.BuildAddressables"
-    unity_cmd+=" -buildTarget $platform"
-    unity_cmd+=" -stackTraceLogType None"
-
-    if [ ${#unity_runtime_args[@]} -gt 0 ]; then
-        unity_cmd+=" ${unity_runtime_args[*]}"
-    fi
-    
-    log "Building Addressables..."
     local log_file="$LOGS_PATH/addressables-build-$platform-$(date +%Y%m%d-%H%M%S).log"
+    log "Command: $UNITY_PATH -batchmode -nographics -useHub -hubIPC -projectPath $PROJECT_PATH -executeMethod BuildScript.BuildAddressables -buildTarget $platform -stackTraceLogType None ${unity_runtime_args[*]:-}"
+    log "Building Addressables..."
     
     # Run Unity directly without eval for security
     # -useHub -hubIPC: required for Hub-based license resolution when launched outside Hub

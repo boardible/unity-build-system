@@ -95,12 +95,11 @@ log_success "Addressables uploaded to S3 ($FILE_COUNT files)"
 # ── Invalidate CloudFront cache ───────────────────────────────────────────────
 if [ -n "${ADDRESSABLES_CLOUDFRONT_DISTRIBUTION_ID:-}" ]; then
     # Extract just the path prefix from the S3 path for the invalidation pattern
-    # ADDRESSABLES_S3_PATH might be s3://bucket/addressables_test
-    # We need: /addressables_test/Android/*
-    CDN_PREFIX="${ADDRESSABLES_S3_PATH#s3://*/}"   # strip s3://bucket
-    CDN_PREFIX="${ADDRESSABLES_S3_PATH#s3://[^/]*/}"  # portable: strip s3://bucket/
-    # Fallback: just derive from last path component
-    CDN_PREFIX="/${ADDRESSABLES_S3_PATH##*/}/$BUILD_TARGET/*"
+    # ADDRESSABLES_S3_PATH might be s3://bucket/addressables_test or s3://bucket/path/prefix
+    # We need: /addressables_test/Android/* or /path/prefix/Android/*
+    local s3_no_scheme="${ADDRESSABLES_S3_PATH#s3://}"   # strip s3://
+    local s3_path_only="${s3_no_scheme#*/}"               # strip bucket name
+    CDN_PREFIX="/${s3_path_only}/$BUILD_TARGET/*"
 
     log "Invalidating CloudFront path: $CDN_PREFIX"
     INVALIDATION_ID=$(aws cloudfront create-invalidation \
