@@ -148,6 +148,24 @@ ensure_project_not_open_in_unity() {
     fi
 }
 
+# Unity Hub 3.10+ changed IPC channel naming from username-based to token-based.
+# Unity Editor batchmode still looks for "Unity-LicenseClient-{username}.sock" but
+# Hub now creates "Unity-LicenseClient-{random_token}.sock". Symlink to bridge the gap.
+fix_hub_ipc_channel_name() {
+    local expected="/tmp/Unity-LicenseClient-$(whoami).sock"
+    local actual
+    actual=$(ls /tmp/Unity-LicenseClient-*.sock 2>/dev/null | grep -v notifications | head -1)
+    if [ -z "$actual" ]; then
+        log "⚠️  No Hub license IPC socket found in /tmp — Hub may not be running"
+        return 0
+    fi
+    if [ "$actual" = "$expected" ]; then
+        return 0
+    fi
+    ln -sf "$actual" "$expected"
+    log "Hub IPC: linked $(basename "$actual") → $(basename "$expected")"
+}
+
 report_unity_package_registration_failure() {
     local log_file="$1"
 
@@ -399,12 +417,13 @@ build_unity() {
     log "Executing Unity build command..."
     log "Command: $unity_cmd"
     ensure_project_not_open_in_unity
+    fix_hub_ipc_channel_name
     
     # Execute Unity build with real-time output and log file
     local log_file="$LOGS_PATH/unity-build-$platform-$(date +%Y%m%d-%H%M%S).log"
     
     run_unity_with_followed_log "$log_file" \
-        "$UNITY_PATH" -batchmode -nographics \
+        "$UNITY_PATH" -batchmode -nographics -useHub -hubIPC \
         -projectPath "$PROJECT_PATH" \
         -buildTarget "$build_target" \
         -buildPath "$output_path" \
@@ -454,10 +473,11 @@ build_addressables() {
     
     log "Building Addressables..."
     ensure_project_not_open_in_unity
+    fix_hub_ipc_channel_name
     local log_file="$LOGS_PATH/addressables-build-$platform-$(date +%Y%m%d-%H%M%S).log"
     
     run_unity_with_followed_log "$log_file" \
-        "$UNITY_PATH" -batchmode -nographics \
+        "$UNITY_PATH" -batchmode -nographics -useHub -hubIPC \
         -projectPath "$PROJECT_PATH" \
         -executeMethod "BuildScript.BuildAddressables" \
         -buildTarget "$platform" \

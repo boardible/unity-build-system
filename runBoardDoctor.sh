@@ -87,6 +87,24 @@ ensure_project_not_open_in_unity() {
     fi
 }
 
+# Unity Hub 3.10+ changed IPC channel naming from username-based to token-based.
+# Unity Editor batchmode still looks for "Unity-LicenseClient-{username}.sock" but
+# Hub now creates "Unity-LicenseClient-{random_token}.sock". Symlink to bridge the gap.
+fix_hub_ipc_channel_name() {
+    local expected="/tmp/Unity-LicenseClient-$(whoami).sock"
+    local actual
+    actual=$(ls /tmp/Unity-LicenseClient-*.sock 2>/dev/null | grep -v notifications | head -1)
+    if [ -z "$actual" ]; then
+        log "⚠️  No Hub license IPC socket found in /tmp — Hub may not be running"
+        return 0
+    fi
+    if [ "$actual" = "$expected" ]; then
+        return 0
+    fi
+    ln -sf "$actual" "$expected"
+    log "Hub IPC: linked $(basename "$actual") → $(basename "$expected")"
+}
+
 report_unity_package_registration_failure() {
     local log_file="$1"
 
@@ -160,6 +178,7 @@ log "  - Visual effects data"
 log "  - Game data from CSV sources"
 log ""
 ensure_project_not_open_in_unity
+fix_hub_ipc_channel_name
 
 # Execute BoardDoctor with real-time output
 log_file="$LOGS_PATH/unity-boarddoctor-$(date +%Y%m%d-%H%M%S).log"
