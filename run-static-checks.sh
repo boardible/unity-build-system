@@ -134,6 +134,16 @@ done
 echo "✅ Commons remains project-agnostic"
 echo ""
 
+# Check 7: Legacy hidden game-root references
+echo "📋 Check 7: Checking for legacy hidden game-root references..."
+if python3 "$PROJECT_ROOT/Scripts/check_no_gamesrepo_refs.py"; then
+    echo "✅ No unexpected hidden game-root references found"
+else
+    echo "❌ Found unexpected hidden game-root references"
+    ERRORS=$((ERRORS + 1))
+fi
+echo ""
+
 # Summary
 echo "═══════════════════════════════════════"
 if [ $ERRORS -eq 0 ]; then
