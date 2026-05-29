@@ -13,6 +13,38 @@ NC='\033[0m' # No Color
 
 # Script configuration
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+PROJECT_PATH="$(dirname "$SCRIPT_DIR")"
+CONFIG_FILE="$PROJECT_PATH/Assets/Resources/boardibleConfigs.json"
+
+get_s3_app_prefix() {
+    local s3_prefix=""
+
+    if [ -f "$CONFIG_FILE" ]; then
+        if command -v jq &> /dev/null; then
+            s3_prefix=$(jq -r '.s3Prefix // empty' "$CONFIG_FILE")
+        else
+            s3_prefix=$(python3 -c 'import json,sys; data=json.load(open(sys.argv[1])); print(data.get("s3Prefix", ""))' "$CONFIG_FILE" 2>/dev/null || echo "")
+        fi
+    fi
+
+    if [ -n "$s3_prefix" ]; then
+        echo "$s3_prefix"
+        return 0
+    fi
+
+    case "$(basename "$PROJECT_PATH")" in
+        boardgames) echo "boardgames-app/" ;;
+        ineuj) echo "ineuj-app/" ;;
+        tictac) echo "tictac-app/" ;;
+        *)
+            echo ""
+            return 1
+            ;;
+    esac
+}
+
+S3_APP_PREFIX="$(get_s3_app_prefix)"
+S3_BUCKET_PATH="s3://boardible-app/$S3_APP_PREFIX"
 
 # Load AWS credentials from .env file
 ENV_FILE="$SCRIPT_DIR/.env"
@@ -54,10 +86,11 @@ echo ""
 
 # Test 3: S3 bucket access
 echo -e "${BLUE}[TEST 3]${NC} Checking S3 bucket access..."
-if aws s3 ls s3://boardible-app/ineuj-app/ &> /dev/null; then
+if aws s3 ls "$S3_BUCKET_PATH" &> /dev/null; then
     echo -e "${GREEN}✅ S3 bucket is accessible${NC}"
+    echo "Path: $S3_BUCKET_PATH"
     echo "Contents:"
-    aws s3 ls s3://boardible-app/ineuj-app/ | head -5
+    aws s3 ls "$S3_BUCKET_PATH" | head -5
 else
     echo -e "${RED}❌ Cannot access S3 bucket${NC}"
     echo -e "${YELLOW}Verify bucket permissions${NC}"

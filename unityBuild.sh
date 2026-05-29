@@ -8,6 +8,14 @@ set -e  # Exit on any error
 # Get script directory and project paths
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 PROJECT_PATH="$(dirname "$SCRIPT_DIR")"
+COMMON_LIB="$SCRIPT_DIR/lib/common.sh"
+
+if [ -f "$COMMON_LIB" ]; then
+    source "$COMMON_LIB"
+else
+    echo "Error: common build library not found at $COMMON_LIB"
+    exit 1
+fi
 
 # Load project configuration if it exists
 if [ -f "$PROJECT_PATH/project-config.sh" ]; then
@@ -47,7 +55,7 @@ if [ -z "$UNITY_VERSION" ]; then
         export UNITY_VERSION="$DETECTED_VERSION"
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Auto-detected Unity version: $UNITY_VERSION"
     else
-        export UNITY_VERSION="6000.3.7f1"
+        export UNITY_VERSION="6000.3.16f1"
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Using default Unity version: $UNITY_VERSION"
     fi
 fi
@@ -74,7 +82,7 @@ detect_unity_path() {
         fi
     done
     
-    # If exact match fails, try fuzzy match (e.g., 6000.3.7f1 -> 6000.2.14f*)
+    # If exact match fails, try fuzzy match (e.g., 6000.3.16f1 -> 6000.2.14f*)
     local major_version="${version%%.*}"  # Extract major version (e.g., "6000")
     local fuzzy_pattern="/Applications/Unity/Hub/Editor/${major_version}.*/Unity.app/Contents/MacOS/Unity"
     
@@ -146,24 +154,6 @@ ensure_project_not_open_in_unity() {
         log "Close the Unity editor for $PROJECT_PATH, then rerun the script."
         exit 1
     fi
-}
-
-# Unity Hub 3.10+ changed IPC channel naming from username-based to token-based.
-# Unity Editor batchmode still looks for "Unity-LicenseClient-{username}.sock" but
-# Hub now creates "Unity-LicenseClient-{random_token}.sock". Symlink to bridge the gap.
-fix_hub_ipc_channel_name() {
-    local expected="/tmp/Unity-LicenseClient-$(whoami).sock"
-    local actual
-    actual=$(ls /tmp/Unity-LicenseClient-*.sock 2>/dev/null | grep -v notifications | head -1)
-    if [ -z "$actual" ]; then
-        log "⚠️  No Hub license IPC socket found in /tmp — Hub may not be running"
-        return 0
-    fi
-    if [ "$actual" = "$expected" ]; then
-        return 0
-    fi
-    ln -sf "$actual" "$expected"
-    log "Hub IPC: linked $(basename "$actual") → $(basename "$expected")"
 }
 
 report_unity_package_registration_failure() {
@@ -352,9 +342,12 @@ build_unity() {
     local profile=$4
     local additional_args=$5
     local unity_runtime_args=()
+    local unity_launch_args=()
 
     append_unity_runtime_args
     unity_runtime_args=("${UNITY_RUNTIME_ARGS_RESULT[@]}")
+    append_unity_launch_args
+    unity_launch_args=("${UNITY_LAUNCH_ARGS_RESULT[@]}")
     
     log "Building Unity project for $platform using $profile profile..."
     
@@ -417,13 +410,12 @@ build_unity() {
     log "Executing Unity build command..."
     log "Command: $unity_cmd"
     ensure_project_not_open_in_unity
-    fix_hub_ipc_channel_name
     
     # Execute Unity build with real-time output and log file
     local log_file="$LOGS_PATH/unity-build-$platform-$(date +%Y%m%d-%H%M%S).log"
     
     run_unity_with_followed_log "$log_file" \
-        "$UNITY_PATH" -batchmode -nographics -useHub -hubIPC \
+        "$UNITY_PATH" -batchmode -nographics "${unity_launch_args[@]}" \
         -projectPath "$PROJECT_PATH" \
         -buildTarget "$build_target" \
         -buildPath "$output_path" \
@@ -451,9 +443,12 @@ build_unity() {
 build_addressables() {
     local platform=$1
     local unity_runtime_args=()
+    local unity_launch_args=()
 
     append_unity_runtime_args
     unity_runtime_args=("${UNITY_RUNTIME_ARGS_RESULT[@]}")
+    append_unity_launch_args
+    unity_launch_args=("${UNITY_LAUNCH_ARGS_RESULT[@]}")
     
     log "Building Addressables for $platform..."
     
@@ -473,11 +468,10 @@ build_addressables() {
     
     log "Building Addressables..."
     ensure_project_not_open_in_unity
-    fix_hub_ipc_channel_name
     local log_file="$LOGS_PATH/addressables-build-$platform-$(date +%Y%m%d-%H%M%S).log"
     
     run_unity_with_followed_log "$log_file" \
-        "$UNITY_PATH" -batchmode -nographics -useHub -hubIPC \
+        "$UNITY_PATH" -batchmode -nographics "${unity_launch_args[@]}" \
         -projectPath "$PROJECT_PATH" \
         -executeMethod "BuildScript.BuildAddressables" \
         -buildTarget "$platform" \

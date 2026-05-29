@@ -3,6 +3,7 @@
 .env
 *.log
 *.tmp
+__pycache__/
 
 # Android keystores (sensitive)
 *.jks

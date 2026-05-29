@@ -112,6 +112,50 @@ find_unity_path() {
     return 1
 }
 
+UNITY_LAUNCH_ARGS_RESULT=()
+
+cleanup_stale_unity_license_socket() {
+    local expected="/tmp/Unity-LicenseClient-$(whoami).sock"
+    local target=""
+
+    if [ ! -L "$expected" ]; then
+        return 0
+    fi
+
+    target=$(readlink "$expected" 2>/dev/null || true)
+    if [ -n "$target" ] && [ -S "$target" ]; then
+        return 0
+    fi
+
+    rm -f "$expected"
+    log_warn "Removed stale Unity licensing socket link at $(basename "$expected")"
+}
+
+append_unity_launch_args() {
+    UNITY_LAUNCH_ARGS_RESULT=()
+
+    if [ "${BOARDIBLE_USE_HUB_IPC:-false}" != "true" ]; then
+        cleanup_stale_unity_license_socket
+        return 0
+    fi
+
+    UNITY_LAUNCH_ARGS_RESULT+=( -useHub -hubIPC )
+
+    if [ -n "${UNITY_LICENSING_IPC:-}" ]; then
+        UNITY_LAUNCH_ARGS_RESULT+=( -licensingIpc "$UNITY_LICENSING_IPC" )
+    fi
+
+    if [ -n "${UNITY_HUB_SESSION_ID:-}" ]; then
+        UNITY_LAUNCH_ARGS_RESULT+=( -hubSessionId "$UNITY_HUB_SESSION_ID" )
+    fi
+
+    if [ -n "${UNITY_ACCESS_TOKEN:-}" ]; then
+        UNITY_LAUNCH_ARGS_RESULT+=( -accessToken "$UNITY_ACCESS_TOKEN" )
+    fi
+
+    log_warn "BOARDIBLE_USE_HUB_IPC=true. Restoring the legacy Hub IPC launch path."
+}
+
 # Load project configuration file
 # Usage: load_project_config [path_to_config]
 load_project_config() {
@@ -204,6 +248,8 @@ export -f parse_environment
 export -f load_aws_config
 export -f detect_unity_version
 export -f find_unity_path
+export -f cleanup_stale_unity_license_socket
+export -f append_unity_launch_args
 export -f load_project_config
 export -f json_get
 export -f command_exists

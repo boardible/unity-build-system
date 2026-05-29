@@ -31,11 +31,23 @@ error() {
 }
 
 # Detect Unity version matching the project
-UNITY_VERSION=$(grep "m_EditorVersion:" "$PROJECT_PATH/ProjectSettings/ProjectVersion.txt" | sed 's/m_EditorVersion: //' | tr -d '[:space:]' || echo "6000.3.7f1")
+UNITY_VERSION=$(grep "m_EditorVersion:" "$PROJECT_PATH/ProjectSettings/ProjectVersion.txt" | sed 's/m_EditorVersion: //' | tr -d '[:space:]' || echo "6000.3.16f1")
 
 # Unity Android SDK Path
 UNITY_SDK_PATH="/Applications/Unity/Hub/Editor/${UNITY_VERSION}/PlaybackEngines/AndroidPlayer/SDK"
 UNITY_JAVA_HOME="/Applications/Unity/Hub/Editor/${UNITY_VERSION}/PlaybackEngines/AndroidPlayer/OpenJDK"
+
+pick_sdkmanager_java_home() {
+    local legacy_java_home
+    legacy_java_home=$( /usr/libexec/java_home -v 1.8 2>/dev/null || true )
+
+    if [ -n "$legacy_java_home" ] && [ -d "$legacy_java_home" ]; then
+        echo "$legacy_java_home"
+        return 0
+    fi
+
+    echo "$UNITY_JAVA_HOME"
+}
 
 if [ ! -d "$UNITY_SDK_PATH" ]; then
     warning "Unity SDK not found at $UNITY_SDK_PATH"
@@ -49,7 +61,7 @@ log "Step 1: Accepting Android SDK Licenses for Unity's SDK..."
 if [ -d "$UNITY_SDK_PATH" ] && [ -d "$UNITY_JAVA_HOME" ]; then
     SDKMANAGER=$(find "$UNITY_SDK_PATH" -name "sdkmanager" | head -n 1)
     if [ -n "$SDKMANAGER" ]; then
-        export JAVA_HOME="$UNITY_JAVA_HOME"
+        export JAVA_HOME="$(pick_sdkmanager_java_home)"
         log "Using sdkmanager at: $SDKMANAGER"
         yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 && success "Licenses accepted." || warning "Some licenses could not be auto-accepted (may be already accepted)."
     else

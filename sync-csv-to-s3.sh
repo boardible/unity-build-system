@@ -23,6 +23,7 @@ AWS_S3_BUCKET="boardible-app"
 AWS_REGION="us-east-1"
 AWS_PROFILE="${AWS_PROFILE:-}"  # Use profile if set, otherwise default
 CLOUDFRONT_DOMAIN=""  # Will be loaded from AWSDevInfos
+DIRECT_S3_DOMAIN="boardible-app.s3.us-east-1.amazonaws.com"
 
 # Determine environment (dev or prod)
 UPDATE_CONFIG=false  # Whether to update boardibleConfigs.json with CloudFront URLs
@@ -62,8 +63,19 @@ load_s3_config() {
         if [ -n "$s3_base" ]; then
             S3_PREFIX="${s3_base}configs/$ENVIRONMENT"
         else
-            S3_PREFIX="ineuj-app/configs/$ENVIRONMENT"
-            log_warn "Using default S3 prefix"
+            local default_s3_base=""
+            case "$(basename "$PROJECT_PATH")" in
+                boardgames) default_s3_base="boardgames-app/" ;;
+                ineuj) default_s3_base="ineuj-app/" ;;
+                tictac) default_s3_base="tictac-app/" ;;
+                *)
+                    log_error "Could not determine default S3 prefix for project: $(basename "$PROJECT_PATH")"
+                    exit 1
+                    ;;
+            esac
+
+            S3_PREFIX="${default_s3_base}configs/$ENVIRONMENT"
+            log_warn "s3Prefix missing in boardibleConfigs.json, using project default: $default_s3_base"
         fi
         log_info "S3 Prefix: $S3_PREFIX"
     else
@@ -262,56 +274,72 @@ cache_csv_to_resources() {
 
 # Update boardibleConfigs.json with CloudFront URLs
 update_config_urls() {
-    if [ -z "$CLOUDFRONT_DOMAIN" ]; then
-        log_warn "Cannot update config - CloudFront domain not found"
-        return 1
-    fi
-    
     local config_file="$PROJECT_PATH/Assets/Resources/boardibleConfigs.json"
     local config_backup="${config_file}.backup"
+    local url_domain="$DIRECT_S3_DOMAIN"
+
+    if [ -n "$CLOUDFRONT_DOMAIN" ] && [ "$CLOUDFRONT_DOMAIN" != "d335ubvb4lxbkd.cloudfront.net" ]; then
+        url_domain="$CLOUDFRONT_DOMAIN"
+    else
+        log_warn "Configured CloudFront domain is unavailable. Falling back to direct S3 URLs."
+    fi
     
-    log_info "Updating boardibleConfigs.json with CloudFront URLs..."
+    log_info "Updating boardibleConfigs.json with runtime CSV URLs..."
     
     # Create backup
     cp "$config_file" "$config_backup"
     log_info "Created backup: ${config_backup}"
     
-    # Build CloudFront base URL
-    local cloudfront_base="https://${CLOUDFRONT_DOMAIN}/${S3_PREFIX}"
+    # Build runtime base URL
+    local base_url="https://${url_domain}/${S3_PREFIX}"
     
     # Check if jq is available for better JSON manipulation
     if command -v jq &> /dev/null; then
         local temp_file="${config_file}.tmp"
         local updated=0
         
-        # Update localizationURL (maps to "localization" CSV key)
-        local localization_url="${cloudfront_base}/localization.csv"
-        jq --arg url "$localization_url" \
-           'if .localizationURL then .localizationURL = $url else . end' \
+          local has_partners=$(jq '(.csvSources // {}) | has("partners")' "$config_file")
+          local has_daily_cards=$(jq '(.csvSources // {}) | has("daily-cards")' "$config_file")
+
+          # Update localizationURL (maps to "localization" CSV key)
+          local localization_url="${base_url}/localization.csv"
+          jq --arg env "$ENVIRONMENT" --arg url "$localization_url" \
+              '.localizationURL = $url | .configs[$env].localizationURL = $url' \
            "$config_file" > "$temp_file"
         mv "$temp_file" "$config_file"
         log_info "Updated localizationURL → $localization_url"
         ((updated++))
         
-        # Update partnerURL (maps to "partners" CSV key)
-        local partner_url="${cloudfront_base}/partners.csv"
-        jq --arg url "$partner_url" \
-           'if .partnerURL then .partnerURL = $url else . end' \
-           "$config_file" > "$temp_file"
-        mv "$temp_file" "$config_file"
-        log_info "Updated partnerURL → $partner_url"
-        ((updated++))
-        
         # Update notificationsURL (maps to "notifications" CSV key)
-        local notifications_url="${cloudfront_base}/notifications.csv"
-        jq --arg url "$notifications_url" \
-           'if .tools.notificationsURL then .tools.notificationsURL = $url else . end' \
+          local notifications_url="${base_url}/notifications.csv"
+          jq --arg env "$ENVIRONMENT" --arg url "$notifications_url" \
+              '.tools.notificationsURL = $url | .configs[$env].notificationsURL = $url' \
            "$config_file" > "$temp_file"
         mv "$temp_file" "$config_file"
         log_info "Updated notificationsURL → $notifications_url"
         ((updated++))
+
+          if [ "$has_partners" = "true" ]; then
+                local partner_url="${base_url}/partners.csv"
+                jq --arg env "$ENVIRONMENT" --arg url "$partner_url" \
+                    '.partnerURL = $url | .configs[$env].partnerURL = $url' \
+                    "$config_file" > "$temp_file"
+                mv "$temp_file" "$config_file"
+                log_info "Updated partnerURL → $partner_url"
+                ((updated++))
+          fi
+
+          if [ "$has_daily_cards" = "true" ]; then
+                local daily_cards_url="${base_url}/daily-cards.csv"
+                jq --arg env "$ENVIRONMENT" --arg url "$daily_cards_url" \
+                    '.tools.dailyCardsURL = $url | .configs[$env].dailyCardsURL = $url' \
+                    "$config_file" > "$temp_file"
+                mv "$temp_file" "$config_file"
+                log_info "Updated dailyCardsURL → $daily_cards_url"
+                ((updated++))
+          fi
         
-        log_success "Updated $updated config URLs to CloudFront"
+          log_success "Updated $updated config URLs"
         log_info "Backup saved at: ${config_backup}"
         return 0
     else

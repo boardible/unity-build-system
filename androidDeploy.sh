@@ -90,7 +90,13 @@ if [ -z "$ANDROID_BUILD_FILE_PATH" ]; then
 fi
 
 if [ -z "$ANDROID_BUILD_MAPPING_PATH" ]; then
-    export ANDROID_BUILD_MAPPING_PATH="$ANDROID_BUILD_PATH/app_mapping.txt"
+    if [ -f "$ANDROID_BUILD_PATH/app_mapping.txt" ]; then
+        export ANDROID_BUILD_MAPPING_PATH="$ANDROID_BUILD_PATH/app_mapping.txt"
+    elif [ -f "$ANDROID_BUILD_PATH/mapping.txt" ]; then
+        export ANDROID_BUILD_MAPPING_PATH="$ANDROID_BUILD_PATH/mapping.txt"
+    else
+        export ANDROID_BUILD_MAPPING_PATH="$ANDROID_BUILD_PATH/app_mapping.txt"
+    fi
 fi
 
 # Extract version from Unity ProjectSettings — single source of truth

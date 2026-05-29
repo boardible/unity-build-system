@@ -34,7 +34,7 @@ if [ -z "$UNITY_VERSION" ]; then
         export UNITY_VERSION="$DETECTED_VERSION"
         log "Auto-detected Unity version: $UNITY_VERSION"
     else
-        export UNITY_VERSION="6000.3.7f1"
+        export UNITY_VERSION="6000.3.16f1"
         log "Using default Unity version: $UNITY_VERSION"
     fi
 fi
@@ -85,24 +85,6 @@ ensure_project_not_open_in_unity() {
         log "Close the Unity editor for $PROJECT_PATH, then rerun BoardDoctor."
         exit 1
     fi
-}
-
-# Unity Hub 3.10+ changed IPC channel naming from username-based to token-based.
-# Unity Editor batchmode still looks for "Unity-LicenseClient-{username}.sock" but
-# Hub now creates "Unity-LicenseClient-{random_token}.sock". Symlink to bridge the gap.
-fix_hub_ipc_channel_name() {
-    local expected="/tmp/Unity-LicenseClient-$(whoami).sock"
-    local actual
-    actual=$(ls /tmp/Unity-LicenseClient-*.sock 2>/dev/null | grep -v notifications | head -1)
-    if [ -z "$actual" ]; then
-        log "⚠️  No Hub license IPC socket found in /tmp — Hub may not be running"
-        return 0
-    fi
-    if [ "$actual" = "$expected" ]; then
-        return 0
-    fi
-    ln -sf "$actual" "$expected"
-    log "Hub IPC: linked $(basename "$actual") → $(basename "$expected")"
 }
 
 report_unity_package_registration_failure() {
@@ -178,12 +160,12 @@ log "  - Visual effects data"
 log "  - Game data from CSV sources"
 log ""
 ensure_project_not_open_in_unity
-fix_hub_ipc_channel_name
+append_unity_launch_args
 
 # Execute BoardDoctor with real-time output
 log_file="$LOGS_PATH/unity-boarddoctor-$(date +%Y%m%d-%H%M%S).log"
 run_unity_with_followed_log "$log_file" \
-    "$UNITY_PATH" -batchmode -nographics -useHub -hubIPC \
+    "$UNITY_PATH" -batchmode -nographics "${UNITY_LAUNCH_ARGS_RESULT[@]}" \
     -projectPath "$PROJECT_PATH" \
     -executeMethod "BuildScript.RunBoardDoctor" \
     -stackTraceLogType None
