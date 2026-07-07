@@ -8,3 +8,6 @@ __pycache__/
 # Android keystores (sensitive)
 *.jks
 *.keystore
+
+# Local env backups
+*.bak
