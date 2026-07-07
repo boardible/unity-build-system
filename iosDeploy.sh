@@ -60,6 +60,36 @@ validate_env_vars() {
 
 log "=== iOS Deployment Script Started ==="
 
+# Match clones the certificates repo over HTTPS using REPO_TOKEN (see
+# fastlane/Fastfile + Matchfile). An expired PAT in .env.ios.local otherwise
+# only surfaces at the match step, after the ~25-min Unity build. Validate the
+# token up front and fall back to the active `gh` CLI session token.
+resolve_repo_token() {
+    local api="https://api.github.com/repos/${MATCH_REPOSITORY}"
+    local code
+    if [ -n "${REPO_TOKEN:-}" ]; then
+        code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: token $REPO_TOKEN" "$api" || echo 000)
+        [ "$code" = "200" ] && return 0
+        log "Warning: REPO_TOKEN cannot access $MATCH_REPOSITORY (HTTP $code) - trying gh CLI token"
+    fi
+    if command -v gh >/dev/null 2>&1; then
+        local gh_token
+        gh_token=$(gh auth token 2>/dev/null || true)
+        if [ -n "$gh_token" ]; then
+            code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: token $gh_token" "$api" || echo 000)
+            if [ "$code" = "200" ]; then
+                export REPO_TOKEN="$gh_token"
+                log "Using gh CLI session token for Match repository access"
+                return 0
+            fi
+        fi
+    fi
+    log "Error: no GitHub token can access $MATCH_REPOSITORY"
+    log "Fix: refresh REPO_TOKEN in Scripts/.env.ios.local, or run 'gh auth login'"
+    exit 1
+}
+resolve_repo_token
+
 # Validate all required environment variables
 validate_env_vars \
     "APPLE_DEVELOPER_EMAIL" \
@@ -156,9 +186,9 @@ find "$IOS_BUILD_PATH" -type f -iname "usymtool" -exec chmod +x {} \;
 # Initialize SSH agent for git operations
 eval "$(ssh-agent -s)"
 
-# Install Ruby dependencies
-log "Installing Ruby dependencies..."
-bundle install
+# Install Ruby dependencies (skip if already satisfied)
+log "Checking Ruby dependencies..."
+bundle check >/dev/null 2>&1 || bundle install
 
 # Clean up CocoaPods repos again in case bundler created legacy mirrors via plugins
 cleanup_cocoapods_repos
