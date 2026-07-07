@@ -402,9 +402,12 @@ main() {
         log_info "Using AWS profile: $AWS_PROFILE"
     fi
     
-    # Try to get caller identity
-    if ! $aws_cmd sts get-caller-identity &> /dev/null; then
+    # Try to get caller identity (surface the real AWS error to aid debugging)
+    local _aws_err
+    if ! _aws_err=$($aws_cmd sts get-caller-identity 2>&1); then
         log_warn "AWS credentials expired or not configured."
+        log_warn "aws error: ${_aws_err}"
+        [ -n "$AWS_PROFILE" ] && log_warn "(AWS_PROFILE in use: $AWS_PROFILE)"
         
         # If using SSO profile, attempt automatic login
         if [ -n "$AWS_PROFILE" ]; then
@@ -441,7 +444,7 @@ main() {
                 log_error "AWS credentials not configured."
                 log_error "Option 1 - Use AWS SSO (recommended):"
                 log_error "  aws configure sso"
-                log_error "  export AWS_PROFILE=PowerUserAccess-325252612153"
+                log_error "  export AWS_PROFILE=boardible   # then: aws sso login --profile boardible"
                 log_error ""
                 log_error "Option 2 - Use access keys:"
                 log_error "  aws configure"
@@ -451,7 +454,7 @@ main() {
             log_error "AWS credentials not configured."
             log_error "Option 1 - Use AWS SSO (recommended):"
             log_error "  aws configure sso"
-            log_error "  export AWS_PROFILE=PowerUserAccess-325252612153"
+            log_error "  export AWS_PROFILE=boardible   # then: aws sso login --profile boardible"
             log_error ""
             log_error "Option 2 - Use access keys:"
             log_error "  aws configure"

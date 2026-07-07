@@ -148,8 +148,8 @@ fi
 cd "$PROJECT_PATH"
 
 # Install dependencies and deploy
-log "Installing bundle dependencies..."
-bundle install
+log "Checking bundle dependencies..."
+bundle check >/dev/null 2>&1 || bundle install
 
 # Deploy to Play Store
 log "Deploying to Google Play Store..."

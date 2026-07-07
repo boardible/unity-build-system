@@ -97,8 +97,8 @@ if [ -n "${ADDRESSABLES_CLOUDFRONT_DISTRIBUTION_ID:-}" ]; then
     # Extract just the path prefix from the S3 path for the invalidation pattern
     # ADDRESSABLES_S3_PATH might be s3://bucket/addressables_test or s3://bucket/path/prefix
     # We need: /addressables_test/Android/* or /path/prefix/Android/*
-    local s3_no_scheme="${ADDRESSABLES_S3_PATH#s3://}"   # strip s3://
-    local s3_path_only="${s3_no_scheme#*/}"               # strip bucket name
+    s3_no_scheme="${ADDRESSABLES_S3_PATH#s3://}"   # strip s3://
+    s3_path_only="${s3_no_scheme#*/}"               # strip bucket name
     CDN_PREFIX="/${s3_path_only}/$BUILD_TARGET/*"
 
     log "Invalidating CloudFront path: $CDN_PREFIX"

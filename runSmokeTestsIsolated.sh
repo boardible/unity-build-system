@@ -84,7 +84,7 @@ if [ -z "$UNITY_VERSION" ]; then
     if [ -n "$DETECTED_VERSION" ]; then
         export UNITY_VERSION="$DETECTED_VERSION"
     else
-        export UNITY_VERSION="6000.3.16f1"
+        export UNITY_VERSION="6000.3.17f1"
     fi
 fi
 
@@ -332,6 +332,7 @@ for game_id in "${GAME_IDS[@]}"; do
     results_path="$RESULTS_DIR/${game_id}.xml"
     log_file="$RESULTS_DIR/${game_id}.log"
 
+    # Base command without -testResults so the path can be supplied per-invocation
     command=(
         "$UNITY_PATH"
         -batchmode
@@ -340,7 +341,6 @@ for game_id in "${GAME_IDS[@]}"; do
         -projectPath "$PROJECT_PATH"
         -runTests
         -testPlatform PlayMode
-        -testResults "$results_path"
         -testFilter "$FILTER"
         -smokeGames "$game_id"
     )
@@ -352,7 +352,7 @@ for game_id in "${GAME_IDS[@]}"; do
     log "[$game_id] Starting isolated smoke run"
     : > "$log_file"
     set +e
-    "${command[@]}" -logFile "$log_file" &
+    "${command[@]}" -testResults "$results_path" -logFile "$log_file" &
     unity_pid=$!
     wait_for_results_or_exit "$unity_pid" "$results_path" "$game_id" "$log_file"
     watcher_status=$?
@@ -365,6 +365,36 @@ for game_id in "${GAME_IDS[@]}"; do
     log "[$game_id] Results: $results_path"
     log "[$game_id] Log: $log_file"
 
+    # On a license bootstrap failure, retry once after cleaning up stale sockets.
+    # These failures are transient — a stale UnityLicensingClient socket causes the
+    # new LicensingClient to time out during channel registration and loop forever.
+    if [ "$result_state" != "passed" ] && \
+       [ "$(classify_failure_reason "$log_file")" = "package-registration-failure" ]; then
+        log_warn "[$game_id] License bootstrap failure detected — cleaning up and retrying once"
+        cleanup_stale_unity_license_socket
+        sleep 3
+
+        retry_results_path="$RESULTS_DIR/${game_id}-retry.xml"
+        retry_log_file="$RESULTS_DIR/${game_id}-retry.log"
+        : > "$retry_log_file"
+
+        set +e
+        "${command[@]}" -testResults "$retry_results_path" -logFile "$retry_log_file" &
+        retry_pid=$!
+        wait_for_results_or_exit "$retry_pid" "$retry_results_path" "$game_id" "$retry_log_file"
+        retry_watcher=$?
+        wait "$retry_pid" 2>/dev/null
+        set -e
+
+        result_state=$(read_test_result "$retry_results_path")
+        log "[$game_id] Retry: watcher=$retry_watcher result=$result_state"
+        log "[$game_id] Retry results: $retry_results_path"
+        log "[$game_id] Retry log: $retry_log_file"
+        # Use the retry artifacts as the canonical ones for classification/reporting below
+        log_file="$retry_log_file"
+        results_path="$retry_results_path"
+    fi
+
     if [ "$result_state" = "passed" ]; then
         PASSED_GAMES+=("$game_id")
         log_success "[$game_id] Passed"
@@ -373,7 +403,7 @@ for game_id in "${GAME_IDS[@]}"; do
         FAILED_GAMES+=("$game_id")
         log_error "[$game_id] Failed"
         report_failure_classification "$game_id" "$log_file"
-        tail -n 40 "$log_file" 2>/dev/null || true
+        grep -E "\[Smoke\]|Error |Exception|FAILED|PASSED" "$log_file" 2>/dev/null | tail -50 || true
     fi
 done
 

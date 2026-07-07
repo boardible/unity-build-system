@@ -87,7 +87,7 @@ if [ -z "$UNITY_VERSION" ]; then
     if [ -n "$DETECTED_VERSION" ]; then
         export UNITY_VERSION="$DETECTED_VERSION"
     else
-        export UNITY_VERSION="6000.3.16f1"
+        export UNITY_VERSION="6000.3.17f1"
     fi
 fi
 
@@ -216,7 +216,7 @@ run_unity_with_followed_log() {
 
     : > "$log_file"
 
-    tail -n +1 -F "$log_file" &
+    tail -n +1 -F "$log_file" | grep --line-buffered -E "\[Smoke\]|Running tests|Error |Exception|FAILED|PASSED" &
     tail_pid=$!
 
     passed_marker=$(mktemp /tmp/boardgames-smoke-passed.XXXXXX)
@@ -435,7 +435,7 @@ run_single_smoke_invocation() {
         log_error "Smoke PlayMode tests failed with exit code $exit_code"
         log "Results: $results_path"
         log "Log: $log_file"
-        tail -20 "$log_file" 2>/dev/null || true
+        grep -E "\[Smoke\]|Error |Exception|FAILED|PASSED" "$log_file" 2>/dev/null | tail -50 || true
     fi
 
     return $exit_code

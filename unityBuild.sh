@@ -55,7 +55,7 @@ if [ -z "$UNITY_VERSION" ]; then
         export UNITY_VERSION="$DETECTED_VERSION"
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Auto-detected Unity version: $UNITY_VERSION"
     else
-        export UNITY_VERSION="6000.3.16f1"
+        export UNITY_VERSION="6000.3.17f1"
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Using default Unity version: $UNITY_VERSION"
     fi
 fi
@@ -82,7 +82,7 @@ detect_unity_path() {
         fi
     done
     
-    # If exact match fails, try fuzzy match (e.g., 6000.3.16f1 -> 6000.2.14f*)
+    # If exact match fails, try fuzzy match (e.g., 6000.3.17f1 -> 6000.2.14f*)
     local major_version="${version%%.*}"  # Extract major version (e.g., "6000")
     local fuzzy_pattern="/Applications/Unity/Hub/Editor/${major_version}.*/Unity.app/Contents/MacOS/Unity"
     

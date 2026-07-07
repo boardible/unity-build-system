@@ -31,7 +31,7 @@ error() {
 }
 
 # Detect Unity version matching the project
-UNITY_VERSION=$(grep "m_EditorVersion:" "$PROJECT_PATH/ProjectSettings/ProjectVersion.txt" | sed 's/m_EditorVersion: //' | tr -d '[:space:]' || echo "6000.3.16f1")
+UNITY_VERSION=$(grep "m_EditorVersion:" "$PROJECT_PATH/ProjectSettings/ProjectVersion.txt" | sed 's/m_EditorVersion: //' | tr -d '[:space:]' || echo "6000.3.17f1")
 
 # Unity Android SDK Path
 UNITY_SDK_PATH="/Applications/Unity/Hub/Editor/${UNITY_VERSION}/PlaybackEngines/AndroidPlayer/SDK"
