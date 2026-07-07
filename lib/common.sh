@@ -56,10 +56,24 @@ load_aws_config() {
     local env_file="${1:-$SCRIPT_DIR/.env}"
     
     if [ -f "$env_file" ]; then
-        # Export variables from .env, ignoring comments and empty lines
+        # Export variables from .env.
+        # NOTE: source the file DIRECTLY — do NOT use `source <(grep ... )`.
+        # On macOS's system bash 3.2.57 (arm64) the `source <(process-substitution)`
+        # pattern silently fails: variable assignments run in a subshell and never
+        # reach this shell, so KEYLEN ends up 0 and `aws` falls back to stale/aborted
+        # creds → InvalidClientTokenId. Direct `source` handles `#` comments and blank
+        # lines natively, so the grep filter was never needed.
         set -a  # Mark variables for export
-        source <(grep -v '^#' "$env_file" | grep -v '^$')
+        source "$env_file"
         set +a  # Stop marking variables for export
+        # The .env holds long-term (AKIA…) keys and is the authoritative source.
+        # Force-clear anything inherited from the shell / earlier-sourced .local
+        # files that would override them at auth time:
+        #  - AWS_PROFILE: a stray/dead profile makes `aws` ignore the static keys
+        #    and fail ("credentials not configured" / profile not found).
+        #  - AWS_SESSION_TOKEN/SECURITY_TOKEN: a leftover (usually expired) session
+        #    token poisons static keys → InvalidClientTokenId ("credentials expired").
+        unset AWS_PROFILE AWS_SESSION_TOKEN AWS_SECURITY_TOKEN
         log_success "Loaded AWS credentials from .env"
         return 0
     else
@@ -115,20 +129,46 @@ find_unity_path() {
 UNITY_LAUNCH_ARGS_RESULT=()
 
 cleanup_stale_unity_license_socket() {
-    local expected="/tmp/Unity-LicenseClient-$(whoami).sock"
-    local target=""
+    local username sock target lc_pids
 
-    if [ ! -L "$expected" ]; then
-        return 0
+    # Kill orphaned UnityLicensingClient processes left from crashed or killed Unity runs.
+    # Any LicensingClient running while no Unity Editor is open is an orphan that will
+    # block the IPC channel name and cause the next run to time out during license init.
+    if ! pgrep -f "Unity.app/Contents/MacOS/Unity" >/dev/null 2>&1; then
+        lc_pids=$(pgrep -f "Unity.Licensing.Client" 2>/dev/null || true)
+        if [ -n "$lc_pids" ]; then
+            log_warn "Killing orphaned UnityLicensingClient processes: $lc_pids"
+            echo "$lc_pids" | xargs kill 2>/dev/null || true
+            sleep 2
+            echo "$lc_pids" | xargs kill -9 2>/dev/null || true
+        fi
     fi
 
-    target=$(readlink "$expected" 2>/dev/null || true)
-    if [ -n "$target" ] && [ -S "$target" ]; then
-        return 0
-    fi
+    username="$(whoami)"
 
-    rm -f "$expected"
-    log_warn "Removed stale Unity licensing socket link at $(basename "$expected")"
+    # Remove stale Unity licensing socket files.
+    # Matches plain and version-qualified variants, e.g.:
+    #   Unity-LicenseClient-user.sock
+    #   Unity-LicenseClient-user-notifications.sock
+    #   Unity-LicenseClient-user-6000.3.17.sock
+    #   Unity-LicenseClient-user-6000.3.17-notifications.sock
+    for sock in /tmp/Unity-LicenseClient-"${username}"*.sock; do
+        [ -e "$sock" ] || continue
+
+        if [ -L "$sock" ]; then
+            target=$(readlink "$sock" 2>/dev/null || true)
+            if [ -n "$target" ] && [ -S "$target" ]; then
+                continue  # symlink points to a live socket — leave it
+            fi
+            rm -f "$sock"
+            log_warn "Removed stale licensing socket symlink: $(basename "$sock")"
+        elif [ -S "$sock" ]; then
+            if ! pgrep -f "Unity.Licensing.Client" >/dev/null 2>&1; then
+                rm -f "$sock"
+                log_warn "Removed stale licensing socket file: $(basename "$sock")"
+            fi
+        fi
+    done
 }
 
 append_unity_launch_args() {
