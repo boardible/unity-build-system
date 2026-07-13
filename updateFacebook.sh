@@ -5,9 +5,10 @@
 
 set -e
 
-FACEBOOK_VERSION=${1:-"18.0.0"}
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FACEBOOK_VERSION=${1:-"18.1.0"}
 UNITY_PATH=${2:-"/Applications/Unity/Hub/Editor/6000.3.17f1/Unity.app/Contents/MacOS/Unity"}
-PROJECT_PATH=${3:-"/Users/pedromartinez/Dev/bdb/ineuj"}
+PROJECT_PATH=${3:-"$(cd "$SCRIPT_DIR/.." && pwd)"}
 
 DOWNLOAD_URL="https://github.com/facebook/facebook-sdk-for-unity/releases/download/sdk-version-${FACEBOOK_VERSION}/facebook-unity-sdk-${FACEBOOK_VERSION}.zip"
 TEMP_DIR="/tmp/facebook_sdk_${FACEBOOK_VERSION}"

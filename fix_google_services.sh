@@ -2,7 +2,7 @@
 # Fix Google Play Services / External Dependency Manager (EDM4U) issues
 # Resolves compilation errors when GooglePlayServices namespace is not found
 # 
-# Context: This project uses EDM4U 1.2.186 from Package Manager, NOT Assets folder
+# Context: This project uses EDM4U 1.2.187 from Package Manager, NOT Assets folder
 # We've disabled most EDM4U auto-resolution for iOS/Android builds due to conflicts
 # See: Docs/FIREBASE_CLEANUP_SUMMARY.md and Scripts/fixEDM.sh
 

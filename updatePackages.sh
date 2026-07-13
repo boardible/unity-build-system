@@ -7,17 +7,18 @@
 set -e
 
 # Default values
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FIREBASE_VERSION=""
 FACEBOOK_VERSION=""
 UNITY_PATH=""
-PROJECT_PATH="$(pwd)"
+PROJECT_PATH="$(cd "$SCRIPT_DIR/.." && pwd)"
 DOWNLOADS_DIR="$HOME/Downloads"
 UPDATE_FIREBASE=false
 UPDATE_FACEBOOK=false
 UPDATE_ALL=false
 OPTIMIZE_DEPENDENCIES=false
 CLEAN_AFTER=true  # Changed: clean AFTER installation
-EDM_VERSION="1.2.186"
+EDM_VERSION="1.2.187"
 INTERACTIVE=true  # Confirm each package installation
 
 # Color codes for output
@@ -540,7 +541,7 @@ import_unity_packages() {
 # Function to verify and update EDM4U configuration
 verify_and_update_edm4u() {
     local project_path="$1"
-    local target_version="${2:-1.2.186}"
+    local target_version="${2:-1.2.187}"
     
     print_status "=== Verifying External Dependency Manager (EDM4U) ==="
     
@@ -735,7 +736,7 @@ update_firebase_xml_dependencies() {
     print_warning "⚠ NOT modifying iOS pod versions (Unity SDK ${firebase_version} may use different iOS CocoaPods version)"
     
     # We DO NOT modify iOS pod versions because:
-    # - Unity SDK version (e.g., 13.3.0) != iOS CocoaPods version (e.g., 12.2.0)
+    # - Unity SDK version (e.g., 13.13.0) != iOS CocoaPods version (e.g., 12.15.0)
     # - Firebase Unity SDK packages already have correct iOS versions
     # - Changing them breaks the build
     
@@ -802,7 +803,7 @@ ensure_facebook_version_consistency() {
 # Function to update External Dependency Manager
 update_external_dependency_manager() {
     local project_path="$1"
-    local target_version="${2:-1.2.186}"
+    local target_version="${2:-1.2.187}"
     
     print_status "Updating External Dependency Manager to v${target_version}..."
     
@@ -945,12 +946,12 @@ show_usage() {
     echo "Usage: $0 [options]"
     echo
     echo "Options:"
-    echo "  --firebase [version]     Update Firebase SDK (optional version, defaults to 13.3.0)"
-    echo "  --facebook [version]     Update Facebook SDK (optional version, defaults to 18.0.0)"
+    echo "  --firebase [version]     Update Firebase SDK (optional version, defaults to 13.13.0)"
+    echo "  --facebook [version]     Update Facebook SDK (optional version, defaults to 18.1.0)"
     echo "  --all                    Update both SDKs and apply optimizations"
     echo "  --downloads-dir <path>   Specify downloads directory (defaults to ~/Downloads)"
     echo "  --optimize               Apply all dependency optimizations (recommended)"
-    echo "  --edm-version [version]  Update External Dependency Manager (defaults to 1.2.186)"
+    echo "  --edm-version [version]  Update External Dependency Manager (defaults to 1.2.187)"
     echo "  --unity-path <path>      Specify Unity executable path"
     echo "  --project-path <path>    Specify Unity project path"
     echo "  --non-interactive        Skip confirmation prompts (auto-confirm)"
@@ -976,8 +977,8 @@ show_usage() {
     echo "Examples:"
     echo "  $0 --all                                    Update everything interactively"
     echo "  $0 --all --non-interactive                  Update everything automatically"
-    echo "  $0 --firebase 13.3.0 --optimize             Update Firebase with optimizations"
-    echo "  $0 --facebook 18.0.0 --optimize             Update Facebook with optimizations"
+    echo "  $0 --firebase 13.13.0 --optimize            Update Firebase with optimizations"
+    echo "  $0 --facebook 18.1.0 --optimize             Update Facebook with optimizations"
     echo "  $0 --optimize                               Just verify/update configurations"
     echo
 }
@@ -991,7 +992,7 @@ while [[ $# -gt 0 ]]; do
                 FIREBASE_VERSION="$2"
                 shift
             else
-                FIREBASE_VERSION="13.3.0"
+                FIREBASE_VERSION="13.13.0"
             fi
             shift
             ;;
@@ -1001,7 +1002,7 @@ while [[ $# -gt 0 ]]; do
                 FACEBOOK_VERSION="$2"
                 shift
             else
-                FACEBOOK_VERSION="18.0.0"
+                FACEBOOK_VERSION="18.1.0"
             fi
             shift
             ;;
@@ -1010,8 +1011,8 @@ while [[ $# -gt 0 ]]; do
             UPDATE_FIREBASE=true
             UPDATE_FACEBOOK=true
             OPTIMIZE_DEPENDENCIES=true
-            FIREBASE_VERSION="13.3.0"
-            FACEBOOK_VERSION="18.0.0"
+            FIREBASE_VERSION="13.13.0"
+            FACEBOOK_VERSION="18.1.0"
             shift
             ;;
         --downloads-dir)

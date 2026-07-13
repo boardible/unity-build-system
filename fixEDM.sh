@@ -7,7 +7,7 @@ print_success "=== EDM Cleanup Complete ==="
 print_status "What was fixed:"
 echo "  • Removed old EDM 1.2.166 from Assets (conflicting with 1.2.182)"
 echo "  • Cleared Unity cache and assemblies"
-echo "  • Refreshed EDM 1.2.186 in Package Manager"
+echo "  • Refreshed EDM 1.2.187 in Package Manager"
 echo
 print_status "Next steps:"
 echo "1. Open Unity"
@@ -116,18 +116,18 @@ if [[ -f "$PROJECT_PATH/Packages/packages-lock.json" ]]; then
 fi
 
 # Step 6: Add EDM back with correct version
-print_status "Re-adding EDM version 1.2.186..."
+print_status "Re-adding EDM version 1.2.187..."
 
 # Read manifest, add EDM after com.google.ads.mobile line
 if [[ "$OSTYPE" == "darwin"* ]]; then
     sed -i '' '/"com.google.ads.mobile"/a\
-    "com.google.external-dependency-manager": "1.2.186",
+    "com.google.external-dependency-manager": "1.2.187",
 ' "$PROJECT_PATH/Packages/manifest.json"
 else
-    sed -i '/"com.google.ads.mobile"/a\    "com.google.external-dependency-manager": "1.2.186",' "$PROJECT_PATH/Packages/manifest.json"
+    sed -i '/"com.google.ads.mobile"/a\    "com.google.external-dependency-manager": "1.2.187",' "$PROJECT_PATH/Packages/manifest.json"
 fi
 
-print_success "✓ EDM 1.2.186 added back to manifest"
+print_success "✓ EDM 1.2.187 added back to manifest"
 
 # Step 7: Summary
 echo
