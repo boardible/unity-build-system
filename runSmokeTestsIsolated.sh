@@ -15,6 +15,8 @@ RESULTS_DIR=""
 PHONE_ONLY="false"
 PER_GAME_TIMEOUT_SECONDS="240"
 POST_RESULTS_GRACE_SECONDS="10"
+FAIL_FAST="false"
+RUN_ID=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -42,16 +44,26 @@ while [[ $# -gt 0 ]]; do
             PHONE_ONLY="true"
             shift
             ;;
+        --fail-fast)
+            FAIL_FAST="true"
+            shift
+            ;;
+        --run-id)
+            RUN_ID="$2"
+            shift 2
+            ;;
         --help)
             echo "Usage: ./Scripts/runSmokeTestsIsolated.sh [options]"
             echo ""
             echo "Options:"
             echo "  --games <csv>                     Required comma-separated game ids"
             echo "  --filter <name>                   Unity test filter (default: SmokePlayModeTests.StartsLocalPlayForSupportedGames)"
-            echo "  --results-dir <path>              Directory for per-game NUnit XML files (default: Logs/smoke-isolated-<timestamp>)"
+            echo "  --results-dir <path>              Directory for per-game artifacts (default: Logs/runs/<run-id>/isolated)"
             echo "  --timeout-seconds <n>             Max seconds to wait per game before killing Unity (default: 240)"
             echo "  --post-results-grace-seconds <n>  Seconds to allow Unity to exit after XML is written before killing it (default: 10)"
             echo "  --phone-only                      Skip TV navigation paths during smoke execution"
+            echo "  --fail-fast                       Stop after the first failed isolated game"
+            echo "  --run-id <id>                     Stable artifact run id"
             echo "  --help                            Show this help"
             exit 0
             ;;
@@ -296,11 +308,16 @@ if [ ${#GAME_IDS[@]} -eq 0 ]; then
     exit 1
 fi
 
+if [ -z "$RUN_ID" ]; then
+    RUN_ID="isolated-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+fi
+RUN_ROOT="$PROJECT_PATH/Logs/runs/$RUN_ID"
 if [ -z "$RESULTS_DIR" ]; then
-    RESULTS_DIR="$PROJECT_PATH/Logs/smoke-isolated-$(date +%Y%m%d-%H%M%S)"
+    RESULTS_DIR="$RUN_ROOT/isolated"
 fi
 
 mkdir -p "$RESULTS_DIR"
+prune_unity_artifacts "$PROJECT_PATH"
 cleanup_scene_recovery_artifacts
 
 append_unity_launch_args
@@ -331,6 +348,9 @@ for game_id in "${GAME_IDS[@]}"; do
 
     results_path="$RESULTS_DIR/${game_id}.xml"
     log_file="$RESULTS_DIR/${game_id}.log"
+    events_file="$RESULTS_DIR/${game_id}.events.ndjson"
+    triage_dir="$RESULTS_DIR/${game_id}.triage"
+    rm -f "$events_file"
 
     # Base command without -testResults so the path can be supplied per-invocation
     command=(
@@ -343,7 +363,13 @@ for game_id in "${GAME_IDS[@]}"; do
         -testPlatform PlayMode
         -testFilter "$FILTER"
         -smokeGames "$game_id"
+        -smokeEventsPath "$events_file"
+        -smokeTriageDir "$triage_dir"
     )
+
+    if [ "$FAIL_FAST" = "true" ]; then
+        command+=( -smokeFailFast )
+    fi
 
     if [ "$PHONE_ONLY" = "true" ]; then
         command+=( -smokePhoneOnly true )
@@ -404,8 +430,22 @@ for game_id in "${GAME_IDS[@]}"; do
         log_error "[$game_id] Failed"
         report_failure_classification "$game_id" "$log_file"
         grep -E "\[Smoke\]|Error |Exception|FAILED|PASSED" "$log_file" 2>/dev/null | tail -50 || true
+        if [ "$FAIL_FAST" = "true" ]; then
+            break
+        fi
     fi
 done
+
+SUMMARY_ARGS=()
+for path in "$RESULTS_DIR"/*.xml; do [ -e "$path" ] && SUMMARY_ARGS+=("$path"); done
+for path in "$RESULTS_DIR"/*.events.ndjson; do [ -e "$path" ] && SUMMARY_ARGS+=(--events "$path"); done
+for path in "$RESULTS_DIR"/*.log; do [ -e "$path" ] && SUMMARY_ARGS+=(--log "$path"); done
+python3 "$SCRIPT_DIR/summarize_smoke.py" "${SUMMARY_ARGS[@]}" \
+    --run-id "$RUN_ID" --artifact-root "$RUN_ROOT" --triage-dir "$RUN_ROOT/triage" \
+    --fingerprint-index "$PROJECT_PATH/Logs/smoke-fingerprint-index.json" \
+    --out "$RUN_ROOT/summary.txt" --json-out "$RUN_ROOT/summary.json" --quiet 2>/dev/null || true
+cp "$RUN_ROOT/summary.txt" "$PROJECT_PATH/Logs/smoke-summary-latest.txt" 2>/dev/null || true
+cp "$RUN_ROOT/summary.json" "$PROJECT_PATH/Logs/smoke-summary-latest.json" 2>/dev/null || true
 
 echo ""
 log "Isolated smoke summary: ${#PASSED_GAMES[@]} passed, ${#FAILED_GAMES[@]} failed"

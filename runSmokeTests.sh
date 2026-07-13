@@ -17,6 +17,13 @@ RESULTS_PATH=""
 AUTO_ANSWER=""
 BATCH_SIZE=""
 PHONE_ONLY="false"
+VERBOSE="false"
+FAIL_FAST="false"
+PHASE=""
+CATEGORY=""
+RUN_ID=""
+RUN_RESULT_PATHS=()
+CASE_TIMEOUT_SECONDS=""
 IDLE_TIMEOUT_SECONDS="${SMOKE_IDLE_TIMEOUT_SECONDS:-180}"
 
 while [[ $# -gt 0 ]]; do
@@ -53,6 +60,30 @@ while [[ $# -gt 0 ]]; do
             PHONE_ONLY="true"
             shift
             ;;
+        --verbose)
+            VERBOSE="true"
+            shift
+            ;;
+        --fail-fast)
+            FAIL_FAST="true"
+            shift
+            ;;
+        --phase)
+            PHASE="$2"
+            shift 2
+            ;;
+        --category)
+            CATEGORY="$2"
+            shift 2
+            ;;
+        --run-id)
+            RUN_ID="$2"
+            shift 2
+            ;;
+        --case-timeout)
+            CASE_TIMEOUT_SECONDS="$2"
+            shift 2
+            ;;
         --idle-timeout)
             IDLE_TIMEOUT_SECONDS="$2"
             shift 2
@@ -66,6 +97,12 @@ while [[ $# -gt 0 ]]; do
             echo "  --limit <n>        Limit number of games after filtering"
             echo "  --batch-size <n>   Run the selected game list in sequential batches of n"
             echo "  --phone-only       Skip TV navigation paths during smoke execution"
+            echo "  --verbose          Emit routine boot/lobby/teardown step tracing (noisy)"
+            echo "  --fail-fast        Stop at the first per-game failure"
+            echo "  --phase <name>     Run one phase: load, start, cleanup, action, systems, finish, progression, all"
+            echo "  --category <name>  Add a Unity test category filter"
+            echo "  --run-id <id>      Stable artifact run id (default: timestamp-pid)"
+            echo "  --case-timeout <s> Override per-game test timeout for debugging"
             echo "  --idle-timeout <s> Kill Unity after s seconds with no log updates (0 disables)"
             echo "  --filter <name>    Unity test filter (default: SmokePlayModeTests)"
             echo "  --results <path>   Output NUnit XML path"
@@ -79,6 +116,18 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+case "$PHASE" in
+    ""|all) ;;
+    load) FILTER="SmokePlayModeTests.LoadsGameGraphsForConfiguredGames" ;;
+    start) FILTER="SmokePlayModeTests.StartsLocalPlayForSupportedGames" ;;
+    cleanup) FILTER="SmokePlayModeTests.ReturnsToLobbyAfterStartedGames" ;;
+    action) FILTER="SmokePlayModeTests.ExecutesAtLeastOneGameplayActionForBotSupportedGames" ;;
+    systems) FILTER="SmokePlayModeTests.LoadsAvatarAndPurchaseSystems" ;;
+    finish) FILTER="SmokePlayModeTests.AutofinishesBotMatchesForRequestedGames" ;;
+    progression) FILTER="SmokePlayModeTests.RunsProgressionContractsForConfiguredBotGames" ;;
+    *) log_error "Unknown smoke phase: $PHASE"; exit 1 ;;
+esac
 
 load_project_config "$PROJECT_PATH/project-config.sh" || true
 
@@ -99,6 +148,11 @@ fi
 
 if [ -n "$AUTO_ANSWER" ] && [ "$AUTO_ANSWER" != "y" ] && [ "$AUTO_ANSWER" != "n" ]; then
     log_error "Invalid value for --auto-answer: $AUTO_ANSWER. Use 'y' or 'n'."
+    exit 1
+fi
+
+if [ -n "$CASE_TIMEOUT_SECONDS" ] && { ! [[ "$CASE_TIMEOUT_SECONDS" =~ ^[0-9]+$ ]] || [ "$CASE_TIMEOUT_SECONDS" -le 0 ]; }; then
+    log_error "Invalid --case-timeout: $CASE_TIMEOUT_SECONDS. Use a positive integer."
     exit 1
 fi
 
@@ -216,7 +270,9 @@ run_unity_with_followed_log() {
 
     : > "$log_file"
 
-    tail -n +1 -F "$log_file" | grep --line-buffered -E "\[Smoke\]|Running tests|Error |Exception|FAILED|PASSED" &
+    # Keep the PID of tail itself. With `tail | grep &`, Bash exposes grep's PID
+    # and leaves tail -F alive after the test, hanging the wrapper at shutdown.
+    tail -n +1 -F "$log_file" > >(grep --line-buffered -E "\[SmokeEvent\]|Running tests|^\[Smoke\] (Starting|GameController running)|^Error |Exception:|FAILED|PASSED") &
     tail_pid=$!
 
     passed_marker=$(mktemp /tmp/boardgames-smoke-passed.XXXXXX)
@@ -233,10 +289,11 @@ run_unity_with_followed_log() {
     watch_unity_process "$unity_pid" "$log_file" "$results_path" "$IDLE_TIMEOUT_SECONDS" "$passed_marker" "$timeout_marker" &
     watchdog_pid=$!
 
-    set +e
-    wait "$unity_pid"
-    exit_code=$?
-    set -e
+    if wait "$unity_pid"; then
+        exit_code=0
+    else
+        exit_code=$?
+    fi
 
     kill "$watchdog_pid" >/dev/null 2>&1 || true
     wait "$watchdog_pid" 2>/dev/null || true
@@ -340,7 +397,7 @@ build_batch_results_path() {
     batch_tag=$(printf 'batch-%02d-of-%02d' "$batch_index" "$total_batches")
 
     if [ -z "$base_path" ]; then
-        printf '%s/smoke-playmode-%s-%s.xml' "$LOGS_PATH" "$(date +%Y%m%d-%H%M%S)" "$batch_tag"
+        printf '%s/batch-%02d/results.xml' "$RUN_ROOT" "$batch_index"
         return
     fi
 
@@ -360,8 +417,16 @@ run_single_smoke_invocation() {
     local smoke_auto_finish_games="$3"
     local smoke_limit="$4"
     local batch_label="$5"
-    local log_file="$LOGS_PATH/unity-smoke-$(date +%Y%m%d-%H%M%S).log"
+    local invocation_name="${6:-main}"
+    local invocation_dir="$RUN_ROOT/$invocation_name"
+    local log_file="$invocation_dir/unity.log"
+    local events_file="$invocation_dir/events.ndjson"
+    local triage_dir="$invocation_dir/triage"
     local unity_launch_args=()
+
+    mkdir -p "$invocation_dir"
+    rm -f "$events_file"
+    RUN_RESULT_PATHS+=("$results_path")
 
     append_unity_launch_args
     unity_launch_args=("${UNITY_LAUNCH_ARGS_RESULT[@]}")
@@ -376,7 +441,13 @@ run_single_smoke_invocation() {
         -testPlatform PlayMode
         -testResults "$results_path"
         -testFilter "$FILTER"
+        -smokeEventsPath "$events_file"
+        -smokeTriageDir "$triage_dir"
     )
+
+    if [ -n "$CATEGORY" ]; then
+        command+=( -testCategory "$CATEGORY" )
+    fi
 
     if [ -n "$smoke_games" ]; then
         command+=( -smokeGames "$smoke_games" )
@@ -392,6 +463,18 @@ run_single_smoke_invocation() {
 
     if [ "$PHONE_ONLY" = "true" ]; then
         command+=( -smokePhoneOnly true )
+    fi
+
+    if [ "$VERBOSE" = "true" ]; then
+        command+=( -smokeVerbose )
+    fi
+
+    if [ "$FAIL_FAST" = "true" ]; then
+        command+=( -smokeFailFast )
+    fi
+
+    if [ -n "$CASE_TIMEOUT_SECONDS" ]; then
+        command+=( -smokeCaseTimeoutSeconds "$CASE_TIMEOUT_SECONDS" )
     fi
 
     if [ -n "$batch_label" ]; then
@@ -422,23 +505,56 @@ run_single_smoke_invocation() {
     ensure_project_not_open_in_unity
     cleanup_scene_recovery_artifacts
 
-    set +e
-    run_unity_with_followed_log "$log_file" "$results_path" "${command[@]}"
-    local exit_code=$?
-    set -e
+    local exit_code
+    if run_unity_with_followed_log "$log_file" "$results_path" "${command[@]}"; then
+        exit_code=0
+    else
+        exit_code=$?
+    fi
+
+    # Distill the multi-MB results XML / log into a ~20-line verdict. This is the
+    # artifact humans and agents should read first; the raw log is a fallback only
+    # needed when a summary line points at a specific failure worth digging into.
+    local summary_path="$invocation_dir/summary.txt"
+    local summary_json_path="$invocation_dir/summary.json"
+    if [ -f "$SCRIPT_DIR/summarize_smoke.py" ]; then
+        python3 "$SCRIPT_DIR/summarize_smoke.py" "$results_path" \
+            --events "$events_file" --log "$log_file" --run-id "$RUN_ID" \
+            --artifact-root "$RUN_ROOT" --triage-dir "$triage_dir" \
+            --out "$summary_path" --json-out "$summary_json_path" --quiet 2>/dev/null || true
+    fi
 
     if [ $exit_code -eq 0 ]; then
         log_success "Smoke PlayMode tests completed successfully"
-        log "Results: $results_path"
-        log "Log: $log_file"
     else
         log_error "Smoke PlayMode tests failed with exit code $exit_code"
-        log "Results: $results_path"
-        log "Log: $log_file"
-        grep -E "\[Smoke\]|Error |Exception|FAILED|PASSED" "$log_file" 2>/dev/null | tail -50 || true
+    fi
+    log "Results: $results_path"
+    log "Log: $log_file"
+    log "Events: $events_file"
+    if [ -f "$summary_path" ]; then
+        log "Summary: $summary_path"
+        echo ""
+        cat "$summary_path"
+        echo ""
     fi
 
     return $exit_code
+}
+
+summarize_entire_run() {
+    local args=()
+    local path
+    for path in "${RUN_RESULT_PATHS[@]}"; do [ -e "$path" ] && args+=("$path"); done
+    for path in "$RUN_ROOT"/*/events.ndjson; do [ -e "$path" ] && args+=(--events "$path"); done
+    for path in "$RUN_ROOT"/*/unity.log; do [ -e "$path" ] && args+=(--log "$path"); done
+
+    python3 "$SCRIPT_DIR/summarize_smoke.py" "${args[@]}" \
+        --run-id "$RUN_ID" --artifact-root "$RUN_ROOT" --triage-dir "$RUN_ROOT/triage" \
+        --fingerprint-index "$LOGS_PATH/smoke-fingerprint-index.json" \
+        --out "$RUN_ROOT/summary.txt" --json-out "$RUN_ROOT/summary.json" --quiet 2>/dev/null || true
+    cp "$RUN_ROOT/summary.txt" "$LOGS_PATH/smoke-summary-latest.txt" 2>/dev/null || true
+    cp "$RUN_ROOT/summary.json" "$LOGS_PATH/smoke-summary-latest.json" 2>/dev/null || true
 }
 
 ensure_project_not_open_in_unity() {
@@ -454,6 +570,16 @@ ensure_project_not_open_in_unity() {
 
 LOGS_PATH="$PROJECT_PATH/Logs"
 mkdir -p "$LOGS_PATH"
+if [ -z "$RUN_ID" ]; then
+    RUN_ID="smoke-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+fi
+if ! [[ "$RUN_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    log_error "Invalid --run-id. Use letters, digits, dot, underscore, or dash."
+    exit 1
+fi
+RUN_ROOT="$LOGS_PATH/runs/$RUN_ID"
+mkdir -p "$RUN_ROOT"
+UNITY_ARTIFACT_RETENTION="${SMOKE_LOG_RETENTION:-${UNITY_ARTIFACT_RETENTION:-5}}" prune_unity_artifacts "$PROJECT_PATH"
 
 if [ -n "$BATCH_SIZE" ]; then
     if [ -n "$SMOKE_GAMES" ]; then
@@ -482,23 +608,34 @@ if [ -n "$BATCH_SIZE" ]; then
         batch_label="Batch $batch_number/$TOTAL_BATCHES"
 
         if [ "$BATCH_MODE" = "games" ]; then
-            run_single_smoke_invocation "$batch_results_path" "$batch_csv" "" "" "$batch_label"
+            set +e
+            run_single_smoke_invocation "$batch_results_path" "$batch_csv" "" "" "$batch_label" "batch-$(printf '%02d' "$batch_number")"
         else
-            run_single_smoke_invocation "$batch_results_path" "" "$batch_csv" "" "$batch_label"
+            set +e
+            run_single_smoke_invocation "$batch_results_path" "" "$batch_csv" "" "$batch_label" "batch-$(printf '%02d' "$batch_number")"
         fi
 
         batch_exit=$?
+        set -e
         if [ $batch_exit -ne 0 ]; then
             EXIT_CODE=$batch_exit
+            if [ "$FAIL_FAST" = "true" ]; then
+                break
+            fi
         fi
     done
 
+    summarize_entire_run
     exit $EXIT_CODE
 fi
 
 if [ -z "$RESULTS_PATH" ]; then
-    RESULTS_PATH="$LOGS_PATH/smoke-playmode-$(date +%Y%m%d-%H%M%S).xml"
+    RESULTS_PATH="$RUN_ROOT/main/results.xml"
 fi
 
-run_single_smoke_invocation "$RESULTS_PATH" "$SMOKE_GAMES" "$SMOKE_AUTO_FINISH_GAMES" "$SMOKE_LIMIT" ""
-exit $?
+set +e
+run_single_smoke_invocation "$RESULTS_PATH" "$SMOKE_GAMES" "$SMOKE_AUTO_FINISH_GAMES" "$SMOKE_LIMIT" "" "main"
+EXIT_CODE=$?
+set -e
+summarize_entire_run
+exit $EXIT_CODE

@@ -269,6 +269,48 @@ print_banner() {
     echo ""
 }
 
+# Keep generated Unity diagnostics bounded. These artifacts are intentionally
+# ignored by git and can otherwise grow to hundreds of MB during agent/debug runs.
+# Override UNITY_ARTIFACT_RETENTION when a longer local history is useful.
+prune_artifact_glob() {
+    local directory="$1"
+    local pattern="$2"
+    local retention="${3:-${UNITY_ARTIFACT_RETENTION:-5}}"
+    local stale
+
+    [ -d "$directory" ] || return 0
+    if ! [[ "$retention" =~ ^[0-9]+$ ]] || [ "$retention" -le 0 ]; then
+        retention=5
+    fi
+
+    # shellcheck disable=SC2012 # macOS-compatible newest-first pruning.
+    ls -td "$directory"/$pattern 2>/dev/null | tail -n +$((retention + 1)) | while IFS= read -r stale; do
+        [ -n "$stale" ] || continue
+        rm -rf "$stale"
+    done || true
+}
+
+prune_unity_artifacts() {
+    local project_path="${1:-$PROJECT_PATH}"
+    local logs_path="$project_path/Logs"
+    local bridge_path="$project_path/.utmp/unity-control-bridge"
+    local retention="${UNITY_ARTIFACT_RETENTION:-5}"
+
+    prune_artifact_glob "$logs_path" "unity-smoke-*.log" "$retention"
+    prune_artifact_glob "$logs_path" "smoke-playmode-*.xml" "$retention"
+    prune_artifact_glob "$logs_path" "smoke-isolated-*" 3
+    prune_artifact_glob "$logs_path" "unity-boarddoctor-*.log" "$retention"
+    prune_artifact_glob "$logs_path" "unity-gamedoctor-*.log" "$retention"
+    prune_artifact_glob "$logs_path" "unity-build-iOS-*.log" "$retention"
+    prune_artifact_glob "$logs_path" "unity-build-Android-*.log" "$retention"
+    prune_artifact_glob "$logs_path" "unity-addressables-*.log" "$retention"
+    prune_artifact_glob "$logs_path" "unity-analyze-addressables-*.log" "$retention"
+    prune_artifact_glob "$logs_path" "smoke-run*-wrapper.out" 2
+    prune_artifact_glob "$logs_path/runs" "*" "$retention"
+    prune_artifact_glob "$bridge_path/responses" "*.json" 20
+    prune_artifact_glob "$bridge_path/screenshots" "*.png" 10
+}
+
 # Cleanup function to run on exit
 # Usage: trap cleanup_temp_files EXIT
 cleanup_temp_files() {
@@ -295,4 +337,6 @@ export -f json_get
 export -f command_exists
 export -f validate_commands
 export -f print_banner
+export -f prune_artifact_glob
+export -f prune_unity_artifacts
 export -f cleanup_temp_files

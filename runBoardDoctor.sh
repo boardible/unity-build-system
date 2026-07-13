@@ -125,6 +125,7 @@ report_unity_package_registration_failure() {
 # Create logs directory
 LOGS_PATH="$PROJECT_PATH/Logs"
 mkdir -p "$LOGS_PATH"
+prune_unity_artifacts "$PROJECT_PATH"
 
 # Step 1: Sync CSVs from Google Sheets to S3
 log "=== Step 1: Syncing CSVs to S3 ($ENVIRONMENT) ==="

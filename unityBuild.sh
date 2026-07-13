@@ -373,6 +373,7 @@ build_unity() {
             ;;
     esac
     mkdir -p "$LOGS_PATH"
+    prune_unity_artifacts "$PROJECT_PATH"
     
     # Unity build command WITHOUT -quit (BuildScript.cs handles exit via EditorApplication.Exit)
     local unity_cmd="$UNITY_PATH"

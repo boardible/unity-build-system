@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -22,8 +23,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--wait-timeout", type=float, default=60.0, help="Polling timeout in seconds")
     parser.add_argument("--poll-interval", type=float, default=1.0, help="Polling interval in seconds")
     parser.add_argument("--output", default=None, help="Optional path to write the JSON result")
+    parser.add_argument("--artifact-prefix", default="", help="Prefix screenshot artifacts, typically a run id")
     parser.add_argument("--allow-exceptions", action="store_true", help="Do not fail the scenario when bridge exceptions are found")
     parser.add_argument("--skip-screenshot", action="store_true", help="Skip screenshot capture when only status/evidence JSON is needed")
+    parser.add_argument("--quiet", action="store_true", help="Write --output without printing the full JSON payload")
 
     subparsers = parser.add_subparsers(dest="scenario", required=True)
 
@@ -84,6 +87,8 @@ class BridgeScenarioRunner:
         self.poll_interval = parsed.poll_interval
         self.allow_exceptions = parsed.allow_exceptions
         self.skip_screenshot = parsed.skip_screenshot
+        self.artifact_prefix = parsed.artifact_prefix
+        self.output_path = Path(parsed.output).resolve() if parsed.output else None
 
     def heartbeat(self, required_capabilities: set[str] | None = None) -> dict:
         heartbeat_path = self.paths["heartbeat"]
@@ -114,6 +119,15 @@ class BridgeScenarioRunner:
 
     def gameplay_snapshot(self) -> dict:
         return self.request("get_gameplay_snapshot")["result"]
+
+    def gameplay_overview(self) -> dict:
+        return self.request("get_gameplay_overview")["result"]
+
+    def gameplay_timeline(self, since: int = 0, limit: int = 200, categories: str | None = None) -> dict:
+        args = {"since": since, "limit": limit}
+        if categories:
+            args["categories"] = categories
+        return self.request("get_gameplay_timeline", args)["result"]
 
     def recent_exceptions(self, limit: int = 20) -> dict:
         return self.request(
@@ -163,9 +177,18 @@ class BridgeScenarioRunner:
                 "reason": "skip-screenshot flag enabled",
             }
 
+        file_name = f"{self.artifact_prefix}{file_name}"
         self.focus_game_view()
         self.status()
-        return self.request("capture_screenshot", {"fileName": file_name}, timeout=self.screenshot_timeout)["result"]
+        result = self.request("capture_screenshot", {"fileName": file_name}, timeout=self.screenshot_timeout)["result"]
+        source_path = Path(result.get("path", ""))
+        if self.output_path and source_path.is_file():
+            self.output_path.parent.mkdir(parents=True, exist_ok=True)
+            destination = self.output_path.parent / source_path.name
+            shutil.copy2(source_path, destination)
+            result["bridgePath"] = str(source_path)
+            result["path"] = str(destination)
+        return result
 
     def invoke_debug_method(self, method_name: str, type_name: str | None = None, arguments: list | None = None) -> dict:
         args = {"methodName": method_name}
@@ -600,6 +623,8 @@ class BridgeScenarioRunner:
             self.capabilities_for(
                 "get_status",
                 "get_gameplay_snapshot",
+                "get_gameplay_overview",
+                "get_gameplay_timeline",
                 "get_recent_exceptions",
                 "enter_play_mode",
                 "start_local_match",
@@ -609,6 +634,8 @@ class BridgeScenarioRunner:
         )
         known_markers = self.safe_exception_markers()
         self.ensure_runtime_ready()
+        timeline_before = self.gameplay_timeline(limit=1)
+        timeline_cursor = int(timeline_before.get("cursor", 0))
 
         args = {"gameId": game_id, "openBuilder": open_builder}
         if player_count is not None:
@@ -622,6 +649,8 @@ class BridgeScenarioRunner:
             f"local match '{game_id}' to start",
         )
         gameplay = self.gameplay_snapshot()
+        overview = self.gameplay_overview()
+        timeline = self.gameplay_timeline(since=timeline_cursor, limit=300, categories="thread,rpc,data")
         exceptions = self.safe_collect_exception_evidence(known_markers=known_markers)
         screenshot = self.screenshot(f"bridge-local-{game_id}.png")
 
@@ -631,6 +660,8 @@ class BridgeScenarioRunner:
             "result": start_result,
             "status": status,
             "gameplay": gameplay,
+            "overview": overview,
+            "timeline": timeline,
             "exceptions": exceptions,
             "screenshot": screenshot,
         }
@@ -669,11 +700,20 @@ def main() -> int:
         else:
             raise ScenarioFailure(f"Unsupported scenario: {parsed.scenario}")
     except ScenarioFailure as error:
+        if parsed.output:
+            output_path = Path(parsed.output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(json.dumps({
+                "scenario": parsed.scenario,
+                "status": "failed",
+                "error": str(error),
+            }, indent=2) + "\n", encoding="utf-8")
         print(str(error), file=sys.stderr)
         return 1
 
     payload = json.dumps(result, indent=2)
-    print(payload)
+    if not parsed.quiet:
+        print(payload)
 
     if parsed.output:
         output_path = Path(parsed.output)

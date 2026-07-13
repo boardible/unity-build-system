@@ -80,7 +80,7 @@ run_unity_with_followed_log() {
 
     : > "$log_file"
 
-    tail -n +1 -F "$log_file" | grep --line-buffered -E "\[GameDoctor\]|Error |Exception|Failed|Completed" &
+    tail -n +1 -F "$log_file" > >(grep --line-buffered -E "\[GameDoctor\]|Error |Exception|Failed|Completed") &
     local tail_pid=$!
 
     set +e
@@ -96,6 +96,7 @@ run_unity_with_followed_log() {
 
 LOGS_PATH="$PROJECT_PATH/Logs"
 mkdir -p "$LOGS_PATH"
+prune_unity_artifacts "$PROJECT_PATH"
 
 log "Project Path: $PROJECT_PATH"
 log "Unity Path: $UNITY_PATH"

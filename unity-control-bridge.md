@@ -12,6 +12,8 @@ This script talks to the local Unity Editor bridge through `.utmp/unity-control-
 ```bash
 python3 Scripts/unity_control_bridge.py --project boardgames heartbeat
 python3 Scripts/unity_control_bridge.py --project boardgames status
+python3 Scripts/unity_control_bridge.py --project boardgames overview
+python3 Scripts/unity_control_bridge.py --project boardgames timeline --since 120 --limit 50 --categories thread,rpc,data
 python3 Scripts/unity_control_bridge.py --project boardgames open-game dobro --target builder
 python3 Scripts/unity_control_bridge.py --project boardgames start-local dobro --player-count 4 --teams 2,2
 python3 Scripts/unity_control_bridge.py --project boardgames rpc playCard PieceRpcData '{"pieceId":"abc"}'
@@ -21,12 +23,17 @@ python3 Scripts/run_bridge_scenarios.py --project boardgames baseline
 python3 Scripts/run_bridge_scenarios.py --project boardgames onboarding-reset
 python3 Scripts/run_bridge_scenarios.py --project boardgames open-game dobro --target lobby
 python3 Scripts/run_bridge_scenarios.py --project boardgames start-local dobro --player-count 4 --teams 2,2
+./Scripts/dev-check.sh triage dobro --player-count 4 --teams 2,2
 ```
 
 ## Commands
 
 - `heartbeat`
 - `status`
+- `overview` — compact state, watched variables, current blockers, counts, and timeline cursor.
+- `gameplay` — full current gameplay/DataRepo snapshot; use only after overview.
+- `timeline` — paged structured history (`thread`, `rpc`, `data`) without reading raw logs.
+- `clear-timeline`
 - `exceptions`
 - `open-game`
 - `start-local`
@@ -63,3 +70,10 @@ Useful options:
 - `start-local` writes quick play settings before entering Play Mode.
 - `rpc` expects a valid `GameRpcData` subtype plus a JSON object payload.
 - Screenshots are written to `<project>/.utmp/unity-control-bridge/screenshots/`.
+- Scenario runs with `--output` also copy their screenshot beside the JSON report,
+  making a `Logs/runs/<run-id>` triage bundle self-contained.
+- Synchronous client request/response files are deleted after completion or
+  timeout. Stale responses are capped at 20 and screenshots at 10, so repeated
+  agent polling does not grow `.utmp/` indefinitely.
+- `./Scripts/pruneUnityArtifacts.sh --keep 5` applies the shared local artifact
+  retention policy immediately.

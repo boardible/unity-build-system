@@ -44,6 +44,12 @@ def ensure_dirs(paths: dict[str, Path]) -> None:
     paths["screenshots"].mkdir(parents=True, exist_ok=True)
 
 
+def prune_files(directory: Path, pattern: str, keep: int) -> None:
+    files = sorted(directory.glob(pattern), key=lambda path: path.stat().st_mtime, reverse=True)
+    for stale_path in files[keep:]:
+        stale_path.unlink(missing_ok=True)
+
+
 def write_request(request_path: Path, payload: dict) -> None:
     temp_path = request_path.with_suffix(request_path.suffix + ".tmp")
     temp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -66,6 +72,8 @@ def wait_for_response(response_path: Path, timeout_seconds: float) -> dict:
 def send_request(project_root: Path, command: str, args: dict | None, timeout_seconds: float) -> dict:
     paths = bridge_paths(project_root)
     ensure_dirs(paths)
+    prune_files(paths["responses"], "*.json", 20)
+    prune_files(paths["screenshots"], "*.png", 10)
 
     request_id = uuid.uuid4().hex
     request = {
@@ -80,7 +88,14 @@ def send_request(project_root: Path, command: str, args: dict | None, timeout_se
         response_path.unlink()
 
     write_request(request_path, request)
-    return wait_for_response(response_path, timeout_seconds)
+    try:
+        return wait_for_response(response_path, timeout_seconds)
+    finally:
+        # These files belong to this synchronous client invocation. Once read (or
+        # timed out), retaining them only creates an ever-growing local queue. A
+        # request already claimed by Unity has been renamed and this is a no-op.
+        request_path.unlink(missing_ok=True)
+        response_path.unlink(missing_ok=True)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -93,10 +108,30 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("heartbeat", help="Print the current bridge heartbeat")
     subparsers.add_parser("status", help="Request a status snapshot")
     subparsers.add_parser("gameplay", help="Request gameplay, room, and DataRepo snapshot")
+    subparsers.add_parser("overview", help="Request a token-compact gameplay overview")
+    subparsers.add_parser("definition", help="Describe the active game's engine, flows, blocks, PACs, and actions")
+
+    timeline_parser = subparsers.add_parser("timeline", help="Read structured gameplay events")
+    timeline_parser.add_argument("--since", type=int, default=0, help="Only events after this sequence")
+    timeline_parser.add_argument("--limit", type=int, default=100)
+    timeline_parser.add_argument("--categories", default=None, help="Comma-separated categories: thread,rpc,data")
+    timeline_parser.add_argument("--match", default=None, help="Only events containing this text/field/action/node")
+    subparsers.add_parser("clear-timeline", help="Clear the structured gameplay journal")
+    trace_parser = subparsers.add_parser("trace", help="Enable/disable deep DebugEngine logs for selected blocks")
+    trace_parser.add_argument("selectors", help="Comma-separated block/type/title matches; use * explicitly for all")
+    trace_parser.add_argument("--phases", default="Execute,GetNextStep")
+    trace_parser.add_argument("--disable", action="store_true")
 
     exceptions_parser = subparsers.add_parser("exceptions", help="Request recent exceptions")
     exceptions_parser.add_argument("--limit", type=int, default=20)
     exceptions_parser.add_argument("--exceptions-only", action="store_true")
+
+    logs_parser = subparsers.add_parser("logs", help="Read recent Unity logs with token-saving filters")
+    logs_parser.add_argument("--since", type=int, default=0)
+    logs_parser.add_argument("--limit", type=int, default=50)
+    logs_parser.add_argument("--types", default=None, help="Comma-separated Log,Warning,Error,Exception,Assert")
+    logs_parser.add_argument("--contains", default=None)
+    logs_parser.add_argument("--stack", action="store_true", help="Include stack traces")
 
     open_parser = subparsers.add_parser("open-game", help="Open a game in builder or in the lobby")
     open_parser.add_argument("game_id")
@@ -160,6 +195,25 @@ def main() -> int:
         response = send_request(project_root, "get_status", {}, parsed.timeout)
     elif parsed.subcommand == "gameplay":
         response = send_request(project_root, "get_gameplay_snapshot", {}, parsed.timeout)
+    elif parsed.subcommand == "overview":
+        response = send_request(project_root, "get_gameplay_overview", {}, parsed.timeout)
+    elif parsed.subcommand == "definition":
+        response = send_request(project_root, "get_game_definition", {}, parsed.timeout)
+    elif parsed.subcommand == "timeline":
+        args = {"since": parsed.since, "limit": parsed.limit}
+        if parsed.categories:
+            args["categories"] = parsed.categories
+        if parsed.match:
+            args["match"] = parsed.match
+        response = send_request(project_root, "get_gameplay_timeline", args, parsed.timeout)
+    elif parsed.subcommand == "clear-timeline":
+        response = send_request(project_root, "clear_gameplay_timeline", {}, parsed.timeout)
+    elif parsed.subcommand == "trace":
+        response = send_request(project_root, "configure_gameplay_trace", {
+            "selectors": parsed.selectors,
+            "phases": parsed.phases,
+            "enabled": not parsed.disable,
+        }, parsed.timeout)
     elif parsed.subcommand == "exceptions":
         response = send_request(
             project_root,
@@ -170,6 +224,13 @@ def main() -> int:
             },
             parsed.timeout,
         )
+    elif parsed.subcommand == "logs":
+        args = {"since": parsed.since, "limit": parsed.limit, "includeStackTrace": parsed.stack}
+        if parsed.types:
+            args["types"] = parsed.types
+        if parsed.contains:
+            args["contains"] = parsed.contains
+        response = send_request(project_root, "get_recent_logs", args, parsed.timeout)
     elif parsed.subcommand == "open-game":
         args = {"gameId": parsed.game_id}
         if parsed.target is not None:
