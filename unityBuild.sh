@@ -55,7 +55,7 @@ if [ -z "$UNITY_VERSION" ]; then
         export UNITY_VERSION="$DETECTED_VERSION"
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Auto-detected Unity version: $UNITY_VERSION"
     else
-        export UNITY_VERSION="6000.3.17f1"
+        export UNITY_VERSION="6000.5.3f1"
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Using default Unity version: $UNITY_VERSION"
     fi
 fi
@@ -82,26 +82,17 @@ detect_unity_path() {
         fi
     done
     
-    # If exact match fails, try fuzzy match (e.g., 6000.3.17f1 -> 6000.2.14f*)
-    local major_version="${version%%.*}"  # Extract major version (e.g., "6000")
-    local fuzzy_pattern="/Applications/Unity/Hub/Editor/${major_version}.*/Unity.app/Contents/MacOS/Unity"
-    
-    # Use compgen to expand glob safely
-    local expanded_paths
-    shopt -s nullglob
-    expanded_paths=($fuzzy_pattern)
-    shopt -u nullglob
-    
-    if [ ${#expanded_paths[@]} -gt 0 ]; then
-        # Return the first match
-        echo "${expanded_paths[0]}"
-        return 0
-    fi
-    
     return 1
 }
 
-UNITY_PATH=$(detect_unity_path "$UNITY_VERSION")
+if [ -n "${UNITY_PATH:-}" ]; then
+    if [ ! -x "$UNITY_PATH" ]; then
+        echo "Error: UNITY_PATH is not an executable Unity binary: $UNITY_PATH"
+        exit 1
+    fi
+else
+    UNITY_PATH=$(detect_unity_path "$UNITY_VERSION")
+fi
 if [ -z "$UNITY_PATH" ]; then
     echo "Error: Unity $UNITY_VERSION not found."
     echo "Checked locations:"
@@ -658,7 +649,8 @@ build_ios() {
     # The archive contains two session.o entries: a stub (~800b) that appears first and
     # the real implementation (~720KB). The stub wins the linker race causing "could not
     # find symbol" errors. We remove the first (stub) copy, keeping only the real one.
-    local vivox_lib="$PROJECT_PATH/Library/PackageCache/com.unity.services.vivox@50e29f26efd1/Plugins/iOS/libvivoxsdk.a"
+    local vivox_lib
+    vivox_lib=$(find "$PROJECT_PATH/Library/PackageCache" -path '*/com.unity.services.vivox@*/Plugins/iOS/libvivoxsdk.a' -print -quit 2>/dev/null || true)
     if [ -f "$vivox_lib" ]; then
         local dupe_count
         dupe_count=$(ar -tv "$vivox_lib" 2>/dev/null | awk '{print $NF}' | sort | uniq -d | grep -c "^session\.o$" || true)
@@ -671,69 +663,6 @@ build_ios() {
         fi
     fi
 
-    # SAFETY NET: Clean up duplicate CocoaPods sources in Podfile
-    # This ensures Podfile only has ONE source line (GitHub Specs) before pod install
-    # The CDN source is deprecated and causes builds to hang
-    local podfile_path="$ios_build_path/Podfile"
-    if [ -f "$podfile_path" ]; then
-        log "Checking Podfile for duplicate sources..."
-        
-        # Count source lines
-        local source_count=$(grep -c "^source " "$podfile_path" 2>/dev/null || echo "0")
-        
-        if [ "$source_count" -gt 1 ]; then
-            log "⚠️  Found $source_count source lines in Podfile, cleaning up duplicates..."
-            
-            # Show what we found
-            log "Current sources:"
-            grep "^source " "$podfile_path" | while read -r line; do
-                log "  - $line"
-            done
-            
-            # Keep only the first source line (GitHub Specs), remove all others
-            # CDN source is deprecated and causes hangs
-            # Create a temp file with all lines except duplicate source lines
-            local temp_file="${podfile_path}.tmp"
-            local found_source=false
-            
-            while IFS= read -r line; do
-                if [[ "$line" =~ ^source ]]; then
-                    if [ "$found_source" = false ]; then
-                        # First source line - ensure it's the CDN source
-                        echo "source 'https://cdn.cocoapods.org/'" >> "$temp_file"
-                        found_source=true
-                        log "✓ Kept CDN source"
-                    else
-                        # Duplicate source line - skip it
-                        log "✗ Removed duplicate: $line"
-                    fi
-                else
-                    echo "$line" >> "$temp_file"
-                fi
-            done < "$podfile_path"
-            
-            # Replace original with cleaned version
-            mv "$temp_file" "$podfile_path"
-            
-            log "✓ Podfile cleaned - now has single source"
-            log "Final sources:"
-            grep "^source " "$podfile_path" | while read -r line; do
-                log "  - $line"
-            done
-        else
-            log "✓ Podfile already has single source (count: $source_count)"
-        fi
-        
-        # SAFETY NET: Remove deprecated Firebase/Core pod (removed in Firebase SDK 11.0+)
-        if grep -q "pod 'Firebase/Core'" "$podfile_path"; then
-            log "⚠️  Found deprecated Firebase/Core pod, removing..."
-            sed -i '' "/pod 'Firebase\/Core'/d" "$podfile_path"
-            log "✓ Removed Firebase/Core pod"
-        fi
-    else
-        log "⚠️  Podfile not found at: $podfile_path"
-    fi
-    
     # Set environment variables for downstream processes
     export IOS_BUILD_PATH="$ios_build_path"
 }
@@ -773,22 +702,21 @@ build_android() {
     fi
 
     # Build Unity Android project (now includes BoardDoctor + Addressables + Build in single session)
-    build_unity "Android" "Android" "$android_build_path/app.aab" "$PROFILE" "-buildAppBundle"
+    build_unity "Android" "Android" "$android_build_path/app.aab" "$PROFILE" ""
     
     log "Android Unity build completed. AAB file available at: $android_build_path/app.aab"
     
-    # Run Android test with baseline profile generation (MANDATORY for cold start optimization)
-    if [ "$CI" != "true" ] && [ "$SKIP_ANDROID_TEST" != "1" ]; then
+    # Optional device smoke test. A real distributable baseline profile requires a
+    # dedicated Android benchmark/profile producer module, which this Unity project does not have.
+    if [ "$CI" != "true" ] && [ "${RUN_ANDROID_TEST:-0}" = "1" ]; then
         log ""
-        log "📊 Android Test & Baseline Profile Generation"
-        log "This is MANDATORY - ensures optimal cold start time (~15-30% faster)"
+        log "📊 Android device smoke test and ART profile diagnostics"
         log ""
         
         if [ -f "$SCRIPT_DIR/testAndroid.sh" ]; then
             log "Starting Android test with baseline profile..."
             if "$SCRIPT_DIR/testAndroid.sh"; then
-                log "✅ Android test & baseline profile completed successfully"
-                log "Next build will include this profile for faster cold start"
+                log "✅ Android device smoke test completed successfully"
             else
                 log "⚠️  Android test failed"
                 log "You can run it manually: ./Scripts/testAndroid.sh"
@@ -796,9 +724,8 @@ build_android() {
         else
             log "⚠️  testAndroid.sh not found"
         fi
-    elif [ "$CI" = "true" ]; then
-        log "CI environment detected - skipping interactive baseline profile generation"
-        log "Run ./Scripts/testAndroid.sh manually after deployment for profiling"
+    else
+        log "Skipping optional Android device test (set RUN_ANDROID_TEST=1 to enable)"
     fi
     
     # Set environment variables for downstream processes
@@ -814,7 +741,7 @@ main() {
     
     # Parse command line arguments
     PLATFORM=""
-    RELEASE_MODE="development"
+    RELEASE_MODE="dev-environment"
     PROFILE="dev"  # Default to dev profile
     CLEAN_CACHE=false
     RUN_AFTER_BUILD=false
@@ -848,7 +775,7 @@ main() {
                 echo "Options:"
                 echo "  --platform           Target platform: ios, android, or both"
                 echo "  --profile            Build profile: dev or prod (default: dev, auto-set to prod with --release)"
-                echo "  --release            Build in release mode and use prod profile (default: development mode with dev profile)"
+                echo "  --release            Use the prod environment profile (default: dev environment; both are non-Debug player builds)"
                 echo "  --clean-cache        Clear Unity caches before building (forces full recompile)"
                 echo "                       Clears: ScriptAssemblies, Bee, IL2CPP, build artifacts, DerivedData"
                 echo "  --run                Install and run on connected device/emulator after build (Android only)"

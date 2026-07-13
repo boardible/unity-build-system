@@ -8,7 +8,7 @@ set -e
 # Configuration
 REPO_OWNER="boardible"
 REPO_NAME="ineuj"
-UNITY_VERSION="6000.2.6f2"
+UNITY_VERSION="6000.5.3f1"
 RUNNER_VERSION="2.311.0"
 RUNNER_NAME="${RUNNER_NAME:-ineuj-linux-android}"
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"

@@ -130,8 +130,8 @@ if [ "$GENERATE_BASELINE_PROFILE" = "1" ]; then
     log "Generating baseline profile for cold start optimization..."
     if [ -f "$SCRIPT_DIR/generate-baseline-profile.sh" ]; then
         if "$SCRIPT_DIR/generate-baseline-profile.sh"; then
-            log "✅ Baseline profile generated successfully"
-            log "Next build will include optimized cold start profile"
+        log "✅ ART profile diagnostics captured successfully"
+        log "Note: this file is not bundled automatically without a baseline-profile producer module"
         else
             log "⚠️  Baseline profile generation failed, continuing without it"
             log "You can generate it manually later with: ./Scripts/generate-baseline-profile.sh"
@@ -141,7 +141,7 @@ if [ "$GENERATE_BASELINE_PROFILE" = "1" ]; then
     fi
 else
     log "Skipping baseline profile generation (set GENERATE_BASELINE_PROFILE=1 to enable)"
-    log "Baseline profiles improve cold start by ~15-30%"
+    log "A distributable baseline profile requires a dedicated Android producer module"
 fi
 
 # Navigate to project root for Fastlane

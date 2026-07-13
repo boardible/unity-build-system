@@ -22,6 +22,12 @@ FAIL_FAST="false"
 PHASE=""
 CATEGORY=""
 RUN_ID=""
+PERFORMANCE_DURATION=""
+PERFORMANCE_SETTLE=""
+PERFORMANCE_MAX_P95_MS=""
+PERFORMANCE_MAX_FRAME_MS=""
+PERFORMANCE_MAX_SEVERE_HITCHES=""
+PERFORMANCE_MAX_MONO_GROWTH_MB=""
 RUN_RESULT_PATHS=()
 CASE_TIMEOUT_SECONDS=""
 IDLE_TIMEOUT_SECONDS="${SMOKE_IDLE_TIMEOUT_SECONDS:-180}"
@@ -72,6 +78,30 @@ while [[ $# -gt 0 ]]; do
             PHASE="$2"
             shift 2
             ;;
+        --performance-duration)
+            PERFORMANCE_DURATION="$2"
+            shift 2
+            ;;
+        --performance-settle)
+            PERFORMANCE_SETTLE="$2"
+            shift 2
+            ;;
+        --max-p95-frame-ms)
+            PERFORMANCE_MAX_P95_MS="$2"
+            shift 2
+            ;;
+        --max-frame-ms)
+            PERFORMANCE_MAX_FRAME_MS="$2"
+            shift 2
+            ;;
+        --max-severe-hitches)
+            PERFORMANCE_MAX_SEVERE_HITCHES="$2"
+            shift 2
+            ;;
+        --max-mono-growth-mb)
+            PERFORMANCE_MAX_MONO_GROWTH_MB="$2"
+            shift 2
+            ;;
         --category)
             CATEGORY="$2"
             shift 2
@@ -100,6 +130,13 @@ while [[ $# -gt 0 ]]; do
             echo "  --verbose          Emit routine boot/lobby/teardown step tracing (noisy)"
             echo "  --fail-fast        Stop at the first per-game failure"
             echo "  --phase <name>     Run one phase: load, start, cleanup, action, systems, finish, progression, all"
+            echo "                     Performance is available as: --phase performance"
+            echo "  --performance-duration <s> Sampling duration after the game settles (default: 10)"
+            echo "  --performance-settle <s> Seconds to settle before sampling (default: 2)"
+            echo "  --max-p95-frame-ms <ms> Performance gate for P95 frame time (default: 50)"
+            echo "  --max-frame-ms <ms> Performance gate for maximum frame time (default: 500)"
+            echo "  --max-severe-hitches <n> Allowed frames >=100ms (default: 2)"
+            echo "  --max-mono-growth-mb <mb> Allowed Mono growth during sampling (default: 32)"
             echo "  --category <name>  Add a Unity test category filter"
             echo "  --run-id <id>      Stable artifact run id (default: timestamp-pid)"
             echo "  --case-timeout <s> Override per-game test timeout for debugging"
@@ -126,6 +163,7 @@ case "$PHASE" in
     systems) FILTER="SmokePlayModeTests.LoadsAvatarAndPurchaseSystems" ;;
     finish) FILTER="SmokePlayModeTests.AutofinishesBotMatchesForRequestedGames" ;;
     progression) FILTER="SmokePlayModeTests.RunsProgressionContractsForConfiguredBotGames" ;;
+    performance) FILTER="SmokePlayModeTests.MeasuresRuntimePerformanceForConfiguredGames" ;;
     *) log_error "Unknown smoke phase: $PHASE"; exit 1 ;;
 esac
 
@@ -136,7 +174,7 @@ if [ -z "$UNITY_VERSION" ]; then
     if [ -n "$DETECTED_VERSION" ]; then
         export UNITY_VERSION="$DETECTED_VERSION"
     else
-        export UNITY_VERSION="6000.3.17f1"
+        export UNITY_VERSION="6000.5.3f1"
     fi
 fi
 
@@ -475,6 +513,25 @@ run_single_smoke_invocation() {
 
     if [ -n "$CASE_TIMEOUT_SECONDS" ]; then
         command+=( -smokeCaseTimeoutSeconds "$CASE_TIMEOUT_SECONDS" )
+    fi
+
+    if [ -n "$PERFORMANCE_DURATION" ]; then
+        command+=( -smokePerformanceDurationSeconds "$PERFORMANCE_DURATION" )
+    fi
+    if [ -n "$PERFORMANCE_SETTLE" ]; then
+        command+=( -smokePerformanceSettleSeconds "$PERFORMANCE_SETTLE" )
+    fi
+    if [ -n "$PERFORMANCE_MAX_P95_MS" ]; then
+        command+=( -smokePerformanceMaxP95FrameMs "$PERFORMANCE_MAX_P95_MS" )
+    fi
+    if [ -n "$PERFORMANCE_MAX_FRAME_MS" ]; then
+        command+=( -smokePerformanceMaxFrameMs "$PERFORMANCE_MAX_FRAME_MS" )
+    fi
+    if [ -n "$PERFORMANCE_MAX_SEVERE_HITCHES" ]; then
+        command+=( -smokePerformanceMaxSevereHitches "$PERFORMANCE_MAX_SEVERE_HITCHES" )
+    fi
+    if [ -n "$PERFORMANCE_MAX_MONO_GROWTH_MB" ]; then
+        command+=( -smokePerformanceMaxMonoGrowthMb "$PERFORMANCE_MAX_MONO_GROWTH_MB" )
     fi
 
     if [ -n "$batch_label" ]; then

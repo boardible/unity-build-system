@@ -46,7 +46,7 @@ if [ -z "$UNITY_VERSION" ]; then
     if [ -n "$DETECTED_VERSION" ]; then
         export UNITY_VERSION="$DETECTED_VERSION"
     else
-        export UNITY_VERSION="6000.3.17f1"
+        export UNITY_VERSION="6000.5.3f1"
     fi
 fi
 
@@ -73,7 +73,9 @@ run_unity_with_followed_log() {
 
     : > "$log_file"
 
-    tail -n +1 -F "$log_file" | grep --line-buffered -E "\[AddressablesTangleDoctor\]|Error |Exception|Failed|Completed" &
+    # Track tail itself. A background `tail | grep` exposes grep's PID and can leave
+    # tail alive after Unity exits, which makes this wrapper hang during teardown.
+    tail -n +1 -F "$log_file" > >(grep --line-buffered -E "\[AddressablesTangleDoctor\]|Error |Exception|Failed|Completed") &
     local tail_pid=$!
 
     set +e

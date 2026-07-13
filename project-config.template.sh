@@ -3,7 +3,7 @@
 
 # Project Settings
 export PROJECT_NAME="YourUnityProject"
-export UNITY_VERSION="6000.3.17f1"
+export UNITY_VERSION="6000.5.3f1"
 
 # iOS Configuration  
 export IOS_APP_ID="com.yourcompany.yourapp"

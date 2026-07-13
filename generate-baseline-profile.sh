@@ -8,7 +8,8 @@
 # 2. Runs the app multiple times to capture startup traces
 # 3. Extracts and saves the baseline profile
 #
-# The profile gets bundled into the next AAB build for 15-30% faster cold starts
+# This captures ART profile diagnostics. It is not automatically bundled into an AAB;
+# a distributable baseline profile requires a dedicated Android producer module.
 #
 # Usage: ./Scripts/generate-baseline-profile.sh [--device <device_id>]
 
@@ -329,11 +330,6 @@ echo ""
 log "=== Baseline Profile Generation Complete ==="
 log_success "Profile saved to: $PROFILE_OUTPUT_DIR"
 echo ""
-log "Next steps:"
-echo "  1. Rebuild your Android AAB: ./Scripts/unityBuild.sh --platform android --release"
-echo "  2. The baseline profile will be bundled automatically"
-echo "  3. Deploy to Play Store: ./Scripts/androidDeploy.sh"
-echo ""
-log "Expected improvement: 15-30% faster cold starts"
+log "Diagnostic profile captured. Do not treat it as a packaged baseline profile."
 
 exit 0

@@ -12,7 +12,7 @@ param(
 $ErrorActionPreference = "Stop"
 $RepoOwner = "boardible"
 $RepoName = "ineuj"
-$UnityVersion = "6000.2.6f2"
+$UnityVersion = "6000.5.3f1"
 $RunnerVersion = "2.311.0"
 
 # Colors for output

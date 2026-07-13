@@ -53,7 +53,7 @@ if [ -z "$UNITY_VERSION" ]; then
     if [ -n "$DETECTED_VERSION" ]; then
         export UNITY_VERSION="$DETECTED_VERSION"
     else
-        export UNITY_VERSION="6000.3.17f1"
+        export UNITY_VERSION="6000.5.3f1"
     fi
 fi
 

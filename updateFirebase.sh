@@ -7,7 +7,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FIREBASE_VERSION=${1:-"13.13.0"}
-UNITY_PATH=${2:-"/Applications/Unity/Hub/Editor/6000.3.17f1/Unity.app/Contents/MacOS/Unity"}
+UNITY_PATH=${2:-"/Applications/Unity/Hub/Editor/6000.5.3f1/Unity.app/Contents/MacOS/Unity"}
 PROJECT_PATH=${3:-"$(cd "$SCRIPT_DIR/.." && pwd)"}
 
 # Minimum supported Firebase version
