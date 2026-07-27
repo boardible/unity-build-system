@@ -12,11 +12,13 @@ print_banner "Unity Smoke PlayMode Tests"
 FILTER="SmokePlayModeTests"
 SMOKE_GAMES=""
 SMOKE_AUTO_FINISH_GAMES=""
+SMOKE_AUTO_FINISH_TIME_SCALE=""
 SMOKE_LIMIT=""
 RESULTS_PATH=""
 AUTO_ANSWER=""
 BATCH_SIZE=""
 PHONE_ONLY="false"
+GRAPHICS="false"
 VERBOSE="false"
 FAIL_FAST="false"
 PHASE=""
@@ -46,6 +48,10 @@ while [[ $# -gt 0 ]]; do
             SMOKE_AUTO_FINISH_GAMES="$2"
             shift 2
             ;;
+        --auto-finish-time-scale)
+            SMOKE_AUTO_FINISH_TIME_SCALE="$2"
+            shift 2
+            ;;
         --filter)
             FILTER="$2"
             shift 2
@@ -64,6 +70,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --phone-only)
             PHONE_ONLY="true"
+            shift
+            ;;
+        --graphics)
+            GRAPHICS="true"
             shift
             ;;
         --verbose)
@@ -124,12 +134,14 @@ while [[ $# -gt 0 ]]; do
             echo "Options:"
             echo "  --games <csv>      Limit smoke tests to specific game ids"
             echo "  --auto-finish-games <csv> Run the auto-finish bot suite for specific game ids"
+            echo "  --auto-finish-time-scale <x> Auto-finish speed from 1x to 20x (default: 20)"
             echo "  --limit <n>        Limit number of games after filtering"
             echo "  --batch-size <n>   Run the selected game list in sequential batches of n"
             echo "  --phone-only       Skip TV navigation paths during smoke execution"
+            echo "  --graphics         Keep the graphics device enabled and require usable success screenshots"
             echo "  --verbose          Emit routine boot/lobby/teardown step tracing (noisy)"
             echo "  --fail-fast        Stop at the first per-game failure"
-            echo "  --phase <name>     Run one phase: load, start, cleanup, action, systems, finish, progression, all"
+            echo "  --phase <name>     Run one phase: safety, load, start, lifecycle, cleanup, action, systems, finish, progression, all"
             echo "                     Performance is available as: --phase performance"
             echo "  --performance-duration <s> Sampling duration after the game settles (default: 10)"
             echo "  --performance-settle <s> Seconds to settle before sampling (default: 2)"
@@ -154,17 +166,55 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+filter_for_phase() {
+    case "$1" in
+        safety) printf '%s' "SmokePlayModeTests.AggregateSmokeTestsDoNotUseNUnitTimeoutAttributes" ;;
+        load) printf '%s' "SmokePlayModeTests.LoadsGameGraphsForConfiguredGames" ;;
+        start) printf '%s' "SmokePlayModeTests.StartsLocalPlayForSupportedGames" ;;
+        lifecycle) printf '%s' "SmokePlayModeTests.DuplicateGameStartedKeepsTheActiveSession" ;;
+        cleanup) printf '%s' "SmokePlayModeTests.ReturnsToLobbyAfterStartedGames" ;;
+        action) printf '%s' "SmokePlayModeTests.ExecutesAtLeastOneGameplayActionForBotSupportedGames" ;;
+        systems) printf '%s' "SmokePlayModeTests.LoadsAvatarAndPurchaseSystems" ;;
+        finish) printf '%s' "SmokePlayModeTests.AutofinishesBotMatchesForRequestedGames" ;;
+        progression) printf '%s' "SmokePlayModeTests.RunsProgressionContractsForConfiguredBotGames" ;;
+        performance) printf '%s' "SmokePlayModeTests.MeasuresRuntimePerformanceForConfiguredGames" ;;
+        *) return 1 ;;
+    esac
+}
+
 case "$PHASE" in
     ""|all) ;;
-    load) FILTER="SmokePlayModeTests.LoadsGameGraphsForConfiguredGames" ;;
-    start) FILTER="SmokePlayModeTests.StartsLocalPlayForSupportedGames" ;;
-    cleanup) FILTER="SmokePlayModeTests.ReturnsToLobbyAfterStartedGames" ;;
-    action) FILTER="SmokePlayModeTests.ExecutesAtLeastOneGameplayActionForBotSupportedGames" ;;
-    systems) FILTER="SmokePlayModeTests.LoadsAvatarAndPurchaseSystems" ;;
-    finish) FILTER="SmokePlayModeTests.AutofinishesBotMatchesForRequestedGames" ;;
-    progression) FILTER="SmokePlayModeTests.RunsProgressionContractsForConfiguredBotGames" ;;
-    performance) FILTER="SmokePlayModeTests.MeasuresRuntimePerformanceForConfiguredGames" ;;
+    safety|load|start|lifecycle|cleanup|action|systems|finish|progression|performance)
+        FILTER="$(filter_for_phase "$PHASE")"
+        ;;
     *) log_error "Unknown smoke phase: $PHASE"; exit 1 ;;
+esac
+
+if [ "$FILTER" = "SmokePlayModeTests.AutofinishesBotMatchesForRequestedGames" ] &&
+    [ -z "$SMOKE_AUTO_FINISH_GAMES" ]; then
+    log_error "The finish phase requires --auto-finish-games <csv>; refusing an empty green run."
+    exit 1
+fi
+
+ISOLATE_BY_GAME="false"
+ISOLATION_SOURCE="games"
+case "$FILTER" in
+    SmokePlayModeTests|\
+    SmokePlayModeTests.LoadsGameGraphsForConfiguredGames|\
+    SmokePlayModeTests.StartsLocalPlayForSupportedGames|\
+    SmokePlayModeTests.DuplicateGameStartedKeepsTheActiveSession|\
+    SmokePlayModeTests.ReturnsToLobbyAfterStartedGames|\
+    SmokePlayModeTests.ExecutesAtLeastOneGameplayActionForBotSupportedGames|\
+    SmokePlayModeTests.RunsProgressionContractsForConfiguredBotGames|\
+    SmokePlayModeTests.MeasuresRuntimePerformanceForConfiguredGames)
+        ISOLATE_BY_GAME="true"
+        ;;
+    SmokePlayModeTests.AutofinishesBotMatchesForRequestedGames)
+        if [ -n "$SMOKE_AUTO_FINISH_GAMES" ]; then
+            ISOLATE_BY_GAME="true"
+            ISOLATION_SOURCE="auto-finish"
+        fi
+        ;;
 esac
 
 load_project_config "$PROJECT_PATH/project-config.sh" || true
@@ -241,7 +291,7 @@ results_file_passed() {
         return 1
     fi
 
-    grep -q '<test-run' "$results_path" && grep -q 'result="Passed"' "$results_path"
+    grep -q '<test-run[^>]*result="Passed"' "$results_path"
 }
 
 watch_unity_process() {
@@ -300,6 +350,9 @@ run_unity_with_followed_log() {
     local results_path="$2"
     shift 2
     local tail_pid
+    local grep_pid
+    local follow_dir
+    local follow_pipe
     local unity_pid
     local watchdog_pid
     local passed_marker
@@ -308,10 +361,16 @@ run_unity_with_followed_log() {
 
     : > "$log_file"
 
-    # Keep the PID of tail itself. With `tail | grep &`, Bash exposes grep's PID
-    # and leaves tail -F alive after the test, hanging the wrapper at shutdown.
-    tail -n +1 -F "$log_file" > >(grep --line-buffered -E "\[SmokeEvent\]|Running tests|^\[Smoke\] (Starting|GameController running)|^Error |Exception:|FAILED|PASSED") &
+    # Avoid Bash process substitution here: restricted macOS runners can reject
+    # the /dev/fd endpoint before Unity even starts. A named pipe gives us an
+    # explicit PID for both sides so teardown cannot leave tail -F behind.
+    follow_dir=$(mktemp -d /tmp/boardgames-smoke-follow.XXXXXX)
+    follow_pipe="$follow_dir/log.pipe"
+    mkfifo "$follow_pipe"
+    tail -n +1 -F "$log_file" > "$follow_pipe" &
     tail_pid=$!
+    grep --line-buffered -E "\[SmokeEvent\]|Running tests|^\[Smoke\] (Starting|GameController running)|^Error |Exception:|FAILED|PASSED" < "$follow_pipe" &
+    grep_pid=$!
 
     passed_marker=$(mktemp /tmp/boardgames-smoke-passed.XXXXXX)
     timeout_marker=$(mktemp /tmp/boardgames-smoke-timeout.XXXXXX)
@@ -336,8 +395,12 @@ run_unity_with_followed_log() {
     kill "$watchdog_pid" >/dev/null 2>&1 || true
     wait "$watchdog_pid" 2>/dev/null || true
 
+    kill "$grep_pid" >/dev/null 2>&1 || true
     kill "$tail_pid" >/dev/null 2>&1 || true
+    wait "$grep_pid" 2>/dev/null || true
     wait "$tail_pid" 2>/dev/null || true
+    rm -f "$follow_pipe"
+    rmdir "$follow_dir" 2>/dev/null || true
 
     if [ -f "$passed_marker" ]; then
         exit_code=0
@@ -372,7 +435,7 @@ split_csv_into_array() {
     local raw_items
 
     eval "$out_var=()"
-    IFS=',' read -r -a raw_items <<< "$csv"
+    IFS=',;' read -r -a raw_items <<< "$csv"
     for item in "${raw_items[@]}"; do
         item="${item#${item%%[![:space:]]*}}"
         item="${item%${item##*[![:space:]]}}"
@@ -469,19 +532,25 @@ run_single_smoke_invocation() {
     append_unity_launch_args
     unity_launch_args=("${UNITY_LAUNCH_ARGS_RESULT[@]}")
 
-    local command=(
-        "$UNITY_PATH"
-        -batchmode
-        -nographics
+    local command=( "$UNITY_PATH" )
+    if [ "$GRAPHICS" != "true" ]; then
+        command+=( -batchmode -nographics )
+    fi
+    command+=(
         "${unity_launch_args[@]}"
         -projectPath "$PROJECT_PATH"
         -runTests
         -testPlatform PlayMode
         -testResults "$results_path"
         -testFilter "$FILTER"
+        -smokeRun
         -smokeEventsPath "$events_file"
         -smokeTriageDir "$triage_dir"
     )
+
+    if [ "$GRAPHICS" = "true" ]; then
+        command+=( -smokeRequireVisualEvidence )
+    fi
 
     if [ -n "$CATEGORY" ]; then
         command+=( -testCategory "$CATEGORY" )
@@ -493,6 +562,10 @@ run_single_smoke_invocation() {
 
     if [ -n "$smoke_auto_finish_games" ]; then
         command+=( -smokeAutoFinishGames "$smoke_auto_finish_games" )
+    fi
+
+    if [ -n "$SMOKE_AUTO_FINISH_TIME_SCALE" ]; then
+        command+=( -smokeAutoFinishTimeScale "$SMOKE_AUTO_FINISH_TIME_SCALE" )
     fi
 
     if [ -n "$smoke_limit" ]; then
@@ -533,6 +606,12 @@ run_single_smoke_invocation() {
     if [ -n "$PERFORMANCE_MAX_MONO_GROWTH_MB" ]; then
         command+=( -smokePerformanceMaxMonoGrowthMb "$PERFORMANCE_MAX_MONO_GROWTH_MB" )
     fi
+    if [ -n "$PERFORMANCE_MAX_GC_ALLOCATED_MB" ]; then
+        command+=( -smokePerformanceMaxGcAllocatedMb "$PERFORMANCE_MAX_GC_ALLOCATED_MB" )
+    fi
+    if [ "$SMOKE_GC_ATTRIBUTION" = "true" ]; then
+        command+=( -smokeGcAttribution )
+    fi
 
     if [ -n "$batch_label" ]; then
         log "$batch_label"
@@ -546,11 +625,17 @@ run_single_smoke_invocation() {
     if [ -n "$smoke_auto_finish_games" ]; then
         log "Smoke Auto Finish Games: $smoke_auto_finish_games"
     fi
+    if [ -n "$SMOKE_AUTO_FINISH_TIME_SCALE" ]; then
+        log "Smoke Auto Finish Time Scale: ${SMOKE_AUTO_FINISH_TIME_SCALE}x"
+    fi
     if [ -n "$smoke_limit" ]; then
         log "Smoke Limit: $smoke_limit"
     fi
     if [ "$PHONE_ONLY" = "true" ]; then
         log "Smoke Mode: phone-only"
+    fi
+    if [ "$GRAPHICS" = "true" ]; then
+        log "Smoke Graphics: enabled (success screenshots required)"
     fi
     if [ "$IDLE_TIMEOUT_SECONDS" -gt 0 ]; then
         log "Idle Timeout: ${IDLE_TIMEOUT_SECONDS}s"
@@ -567,6 +652,18 @@ run_single_smoke_invocation() {
         exit_code=0
     else
         exit_code=$?
+    fi
+
+    if [ $exit_code -eq 0 ] && ! results_file_passed "$results_path"; then
+        log_error "Unity exited successfully without a passed root <test-run>; treating the invocation as failed."
+        exit_code=2
+    fi
+
+    if [ $exit_code -eq 0 ] &&
+        [ "$FILTER" = "SmokePlayModeTests.AutofinishesBotMatchesForRequestedGames" ] &&
+        grep -q '<test-case[^>]*result="Skipped"' "$results_path"; then
+        log_error "The requested finish game has no deterministic completion driver; refusing a skipped green run."
+        exit_code=2
     fi
 
     # Distill the multi-MB results XML / log into a ~20-line verdict. This is the
@@ -612,6 +709,72 @@ summarize_entire_run() {
         --out "$RUN_ROOT/summary.txt" --json-out "$RUN_ROOT/summary.json" --quiet 2>/dev/null || true
     cp "$RUN_ROOT/summary.txt" "$LOGS_PATH/smoke-summary-latest.txt" 2>/dev/null || true
     cp "$RUN_ROOT/summary.json" "$LOGS_PATH/smoke-summary-latest.json" 2>/dev/null || true
+}
+
+build_named_results_path() {
+    local base_path="$1"
+    local invocation_name="$2"
+
+    if [ -z "$base_path" ]; then
+        printf '%s/%s/results.xml' "$RUN_ROOT" "$invocation_name"
+        return
+    fi
+
+    local extension="${base_path##*.}"
+    local stem="$base_path"
+    if [ "$extension" != "$base_path" ]; then
+        stem="${base_path%.*}"
+        printf '%s-%s.%s' "$stem" "$invocation_name" "$extension"
+    else
+        printf '%s-%s' "$base_path" "$invocation_name"
+    fi
+}
+
+discover_smoke_games() {
+    python3 - "$PROJECT_PATH" <<'PY'
+import pathlib
+import re
+import sys
+
+project = pathlib.Path(sys.argv[1])
+manifest_path = project / "Assets/Tests/PlayMode/Smoke/SmokeGameManifest.cs"
+if not manifest_path.is_file():
+    raise SystemExit(f"Fail-closed smoke manifest not found: {manifest_path}")
+
+text = manifest_path.read_text(encoding="utf-8", errors="strict")
+declaration = re.compile(
+    r"(?:GraphBot|GraphScripted|GraphMissing|CodeBot|CodeMissing)\(\"([^\"]+)\"\)"
+)
+game_ids = declaration.findall(text)
+if not game_ids:
+    raise SystemExit(f"No games declared in fail-closed smoke manifest: {manifest_path}")
+if len(game_ids) != len(set(game_id.casefold() for game_id in game_ids)):
+    raise SystemExit(f"Duplicate game id in fail-closed smoke manifest: {manifest_path}")
+
+print(",".join(game_ids))
+PY
+}
+
+csv_contains_game() {
+    local csv="$1"
+    local expected="$2"
+    local requested
+    local normalized_requested
+    local normalized_expected
+    local raw_items=()
+
+    normalized_expected=$(printf '%s' "$expected" | tr '[:upper:]' '[:lower:]')
+    IFS=',;' read -r -a raw_items <<< "$csv"
+    for requested in "${raw_items[@]}"; do
+        requested="${requested#${requested%%[![:space:]]*}}"
+        requested="${requested%${requested##*[![:space:]]}}"
+        normalized_requested=$(printf '%s' "$requested" | tr '[:upper:]' '[:lower:]')
+        if [ "$normalized_requested" = "$normalized_expected" ]; then
+            return 0
+        fi
+    done
+
+    return 1
 }
 
 ensure_project_not_open_in_unity() {
@@ -665,8 +828,16 @@ if [ -n "$BATCH_SIZE" ]; then
         batch_label="Batch $batch_number/$TOTAL_BATCHES"
 
         if [ "$BATCH_MODE" = "games" ]; then
+            batch_auto_finish=""
+            if [ "$FILTER" = "SmokePlayModeTests" ]; then
+                # A full correctness batch must own the finish gate for the same games.
+                # Passing only -smokeGames makes NUnit execute the finish test with an
+                # empty selection, which is a skipped green and silently drops end-to-end
+                # coverage. Keep the two selections correlated within this process.
+                batch_auto_finish="$batch_csv"
+            fi
             set +e
-            run_single_smoke_invocation "$batch_results_path" "$batch_csv" "" "" "$batch_label" "batch-$(printf '%02d' "$batch_number")"
+            run_single_smoke_invocation "$batch_results_path" "$batch_csv" "$batch_auto_finish" "" "$batch_label" "batch-$(printf '%02d' "$batch_number")"
         else
             set +e
             run_single_smoke_invocation "$batch_results_path" "" "$batch_csv" "" "$batch_label" "batch-$(printf '%02d' "$batch_number")"
@@ -676,6 +847,70 @@ if [ -n "$BATCH_SIZE" ]; then
         set -e
         if [ $batch_exit -ne 0 ]; then
             EXIT_CODE=$batch_exit
+            if [ "$FAIL_FAST" = "true" ]; then
+                break
+            fi
+        fi
+    done
+
+    summarize_entire_run
+    exit $EXIT_CODE
+fi
+
+if [ "$ISOLATE_BY_GAME" = "true" ]; then
+    # The correctness baseline owns one Unity process per game. Unity/Addressables operations are
+    # only partially cancellable, so process isolation is the hard boundary after any timeout.
+    if [ "$ISOLATION_SOURCE" = "auto-finish" ]; then
+        split_csv_into_array "$SMOKE_AUTO_FINISH_GAMES" ISOLATED_GAME_ITEMS
+    elif [ -n "$SMOKE_GAMES" ]; then
+        split_csv_into_array "$SMOKE_GAMES" ISOLATED_GAME_ITEMS
+    else
+        DISCOVERED_SMOKE_GAMES="$(discover_smoke_games)"
+        split_csv_into_array "$DISCOVERED_SMOKE_GAMES" ISOLATED_GAME_ITEMS
+    fi
+    apply_limit_to_array ISOLATED_GAME_ITEMS
+
+    if [ ${#ISOLATED_GAME_ITEMS[@]} -eq 0 ]; then
+        log_error "Smoke isolation did not resolve any GameGraphs ids."
+        exit 1
+    fi
+
+    EXIT_CODE=0
+    game_number=0
+    for game_id in "${ISOLATED_GAME_ITEMS[@]}"; do
+        game_number=$((game_number + 1))
+        safe_game_id=$(printf '%s' "$game_id" | tr -c 'A-Za-z0-9._-' '_')
+        invocation_name="game-$safe_game_id"
+        game_results_path="$(build_named_results_path "$RESULTS_PATH" "$invocation_name")"
+        game_smoke_games="$game_id"
+        game_auto_finish=""
+
+        if [ "$ISOLATION_SOURCE" = "auto-finish" ]; then
+            game_smoke_games=""
+            game_auto_finish="$game_id"
+        elif [ "$FILTER" = "SmokePlayModeTests" ]; then
+            # Full correctness runs own completion too. With no explicit filter, request the
+            # current game and let GameGraphs.CanHaveBots decide whether a deterministic driver
+            # exists. An explicit list remains an opt-in subset for focused runs.
+            if [ -z "$SMOKE_AUTO_FINISH_GAMES" ] ||
+                csv_contains_game "$SMOKE_AUTO_FINISH_GAMES" "$game_id"; then
+                game_auto_finish="$game_id"
+            fi
+        fi
+
+        set +e
+        run_single_smoke_invocation \
+            "$game_results_path" \
+            "$game_smoke_games" \
+            "$game_auto_finish" \
+            "" \
+            "Isolated game $game_number/${#ISOLATED_GAME_ITEMS[@]}: $game_id" \
+            "$invocation_name"
+        game_exit=$?
+        set -e
+
+        if [ $game_exit -ne 0 ]; then
+            EXIT_CODE=$game_exit
             if [ "$FAIL_FAST" = "true" ]; then
                 break
             fi
