@@ -21,6 +21,29 @@ Use `dev-check.sh` as the default entry point for local and agent validation:
 - `visual`: runs one game's correctness gates with a graphics device and captures
   start, first progression, and results evidence when its deterministic driver is
   complete. It fails when required images are empty or too small for review.
+  `--graphics` intentionally drops **both** `-batchmode` and `-nographics`, so this lane
+  boots a windowed Editor. That is not an oversight, and it was measured on 2026-08-05:
+  - `-batchmode` without `-nographics` **does** create a real device (`Metal devices
+    available: 1`, Apple M1) and the scene **does** render — `visiblePrefabs=13`,
+    `runtimeVisuals=1758` — at ~2.1-2.3GB peak versus several GB for a windowed Editor.
+  - But `ScreenCapture.CaptureScreenshot` never completes there. It schedules a readback at
+    Unity's end-of-frame boundary, and with no window presenting frames that boundary never
+    arrives: the PNG is never written. Raising the wait from 5s to 30s changed nothing —
+    zero bytes, `quality=missing`, `size=0x0`.
+
+  So the memory win is real but unusable for *capture*: a batchmode visual lane would report
+  "did not capture usable evidence" on runs that had in fact rendered correctly. Making it
+  work needs a synchronous capture (render a camera into a RenderTexture, `ReadPixels`,
+  `EncodeToPNG`) instead of the scheduled readback — and that must be verified to include the
+  UI Toolkit layer before it is trusted, because a camera-only render can silently omit
+  overlay UI, which would produce exactly the confidently-wrong visual evidence this lane
+  exists to prevent.
+
+  **Only boardgames captures anything here.** `SmokeArtifactRecorder` and
+  `-smokeRequireVisualEvidence` exist in this project alone; ineuj and tictac have no
+  `ScreenCapture` call anywhere in `Assets/Tests`, so `visual` on them runs the correctness
+  gates with a device attached and produces no images. Use `probe` there instead — its capture
+  comes from the Unity CLI, so it needs no per-project C#.
 - `probe`: same idea as `walkthrough`, but the report carries each frame **inline**
   (base64) so whoever reads the JSON sees pixels, instead of a path to an HTML sheet
   someone has to open. Requires an open Editor with `GameBoxScene` loaded, plus the
