@@ -178,10 +178,29 @@ class GameProbe:
         """
         scenes = self.pipeline.call("list_open_scenes")
         loaded = [scene for scene in scenes.get("scenes", []) if scene.get("path")]
+        opened_here = False
+
+        if not loaded:
+            # A freshly launched Editor reports ready before `-openfile` has landed, so an
+            # otherwise-correct setup looks broken. The path is known and open_scene is right
+            # there, so open it rather than telling a human to. Only when nothing is loaded and
+            # nothing is dirty: replacing a scene with unsaved edits could discard real work.
+            dirty = [scene for scene in scenes.get("scenes", []) if scene.get("isDirty")]
+            if dirty:
+                raise ProbeFailure(
+                    f"No saved scene is loaded and the current scene has unsaved changes. Open "
+                    f"{boot_scene} yourself (resolved from {source}) — refusing to replace unsaved work."
+                )
+            self.pipeline.call("open_scene", path=boot_scene)
+            self.pipeline.wait_until_ready()
+            opened_here = True
+            scenes = self.pipeline.call("list_open_scenes")
+            loaded = [scene for scene in scenes.get("scenes", []) if scene.get("path")]
+
         if not loaded:
             raise ProbeFailure(
-                "No scene is loaded in the Editor, so Play Mode would render an empty skybox and "
-                f"nothing would boot. Open {boot_scene} first (resolved from {source})."
+                f"Could not get {boot_scene} loaded (resolved from {source}). Play Mode would "
+                "render an empty skybox and nothing would boot."
             )
         paths = [scene.get("path") for scene in loaded]
         return {
@@ -189,6 +208,7 @@ class GameProbe:
             "bootScene": boot_scene,
             "bootSceneSource": source,
             "bootSceneLoaded": boot_scene in paths,
+            "bootSceneOpenedByProbe": opened_here,
         }
 
     def capture(self, label: str, inline: bool, max_resolution: int) -> dict:
@@ -384,6 +404,7 @@ class GameProbe:
             "bootScene": scene_info["bootScene"],
             "bootSceneSource": scene_info["bootSceneSource"],
             "bootSceneLoaded": scene_info["bootSceneLoaded"],
+            "bootSceneOpenedByProbe": scene_info["bootSceneOpenedByProbe"],
             "frames": captured,
             "flatFrames": flat,
             "framesNotAnalysed": unverified,
