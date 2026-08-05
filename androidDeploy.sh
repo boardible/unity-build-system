@@ -99,6 +99,22 @@ if [ -z "$ANDROID_BUILD_MAPPING_PATH" ]; then
     fi
 fi
 
+# Unity release profiles emit a native symbols ZIP for Crashlytics and Google
+# Play. Pick the newest matching archive from this build output directory.
+if [ -z "${ANDROID_BUILD_SYMBOLS_PATH:-}" ]; then
+    _latest_symbols_zip=""
+    for _candidate_symbols_zip in "$ANDROID_BUILD_PATH"/*.zip; do
+        [ -f "$_candidate_symbols_zip" ] || continue
+        if unzip -l "$_candidate_symbols_zip" 2>/dev/null \
+            | grep -Eq '(^|/)(lib(main|unity|il2cpp)\.so(\.(sym|dbg))?|symbols/|native-debug-symbols)'; then
+            if [ -z "$_latest_symbols_zip" ] || [ "$_candidate_symbols_zip" -nt "$_latest_symbols_zip" ]; then
+                _latest_symbols_zip="$_candidate_symbols_zip"
+            fi
+        fi
+    done
+    export ANDROID_BUILD_SYMBOLS_PATH="$_latest_symbols_zip"
+fi
+
 # Extract version from Unity ProjectSettings — single source of truth
 # Ensures Play Console release labels always match the versionName baked into the AAB
 UNITY_SETTINGS="$PROJECT_PATH/ProjectSettings/ProjectSettings.asset"
@@ -116,6 +132,7 @@ log "Package Name: $ANDROID_PACKAGE_NAME"
 log "App Version: $APP_VERSION (build $APP_BUILD_NUMBER)"
 log "Build File: $ANDROID_BUILD_FILE_PATH"
 log "Mapping File: $ANDROID_BUILD_MAPPING_PATH"
+log "Native Symbols: ${ANDROID_BUILD_SYMBOLS_PATH:-not found}"
 
 # Verify build files exist
 if [ ! -f "$ANDROID_BUILD_FILE_PATH" ]; then

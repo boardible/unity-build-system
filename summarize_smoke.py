@@ -121,6 +121,12 @@ def build_summary(run_id: str, xml_paths: list[str], event_paths: list[str], log
             "fingerprint": fingerprint(phase, event.get("exceptionType"), message) if status != "passed" else None,
             "message": message,
             "diagnostics": event.get("diagnostics"),
+            "failureCategory": event.get("failureCategory"),
+            "failureStage": event.get("failureStage"),
+            "gameplayFailure": bool(event.get("gameplayFailure")),
+            "multiplayerFailureProven": bool(event.get("multiplayerFailureProven")),
+            "artifactCaptureStatus": event.get("artifactCaptureStatus"),
+            "artifactCaptureIssues": event.get("artifactCaptureIssues") or [],
             "artifacts": event.get("artifacts") or {},
             "startedAtUtc": event.get("startedAtUtc"),
             "finishedAtUtc": event.get("finishedAtUtc"),
@@ -178,6 +184,14 @@ def render_text(summary: dict) -> str:
         lines.append(f"{game['status'].upper():6} {game['gameId']:<18} {game['durationSeconds']:>7.1f}s  {phase_text}")
         for phase in game["phases"]:
             if phase["status"] != "passed":
+                if phase.get("failureCategory"):
+                    lines.append(
+                        "  classification="
+                        f"{phase['failureCategory']}@{phase.get('failureStage') or 'unknown'} "
+                        f"gameplayFailure={str(phase.get('gameplayFailure', False)).lower()} "
+                        f"multiplayerFailureProven={str(phase.get('multiplayerFailureProven', False)).lower()} "
+                        f"artifactCapture={phase.get('artifactCaptureStatus') or 'unknown'}"
+                    )
                 lines.extend(f"  {line}" for line in clipped_lines(phase.get("message") or phase.get("diagnostics") or "unknown failure"))
     if not summary["games"]:
         for phase in summary["testPhases"]:

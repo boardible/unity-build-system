@@ -33,6 +33,7 @@ PERFORMANCE_MAX_MONO_GROWTH_MB=""
 RUN_RESULT_PATHS=()
 CASE_TIMEOUT_SECONDS=""
 IDLE_TIMEOUT_SECONDS="${SMOKE_IDLE_TIMEOUT_SECONDS:-180}"
+SMOKE_PLAYER_COUNT=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -62,6 +63,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --auto-answer)
             AUTO_ANSWER="$2"
+            shift 2
+            ;;
+        --player-count)
+            SMOKE_PLAYER_COUNT="$2"
             shift 2
             ;;
         --batch-size)
@@ -134,14 +139,15 @@ while [[ $# -gt 0 ]]; do
             echo "Options:"
             echo "  --games <csv>      Limit smoke tests to specific game ids"
             echo "  --auto-finish-games <csv> Run the auto-finish bot suite for specific game ids"
-            echo "  --auto-finish-time-scale <x> Auto-finish speed from 1x to 20x (default: 20)"
+        echo "  --auto-finish-time-scale <x> Auto-finish speed from 1x to 20x (default: 20)"
+        echo "  --player-count <n>  Override the catalog player count for the selected game"
             echo "  --limit <n>        Limit number of games after filtering"
             echo "  --batch-size <n>   Run the selected game list in sequential batches of n"
             echo "  --phone-only       Skip TV navigation paths during smoke execution"
             echo "  --graphics         Keep the graphics device enabled and require usable success screenshots"
             echo "  --verbose          Emit routine boot/lobby/teardown step tracing (noisy)"
             echo "  --fail-fast        Stop at the first per-game failure"
-            echo "  --phase <name>     Run one phase: safety, load, start, lifecycle, cleanup, action, systems, finish, progression, all"
+            echo "  --phase <name>     Run one phase: safety, load, start, lifecycle, cleanup, action, human, systems, finish, progression, all"
             echo "                     Performance is available as: --phase performance"
             echo "  --performance-duration <s> Sampling duration after the game settles (default: 10)"
             echo "  --performance-settle <s> Seconds to settle before sampling (default: 2)"
@@ -174,6 +180,7 @@ filter_for_phase() {
         lifecycle) printf '%s' "SmokePlayModeTests.DuplicateGameStartedKeepsTheActiveSession" ;;
         cleanup) printf '%s' "SmokePlayModeTests.ReturnsToLobbyAfterStartedGames" ;;
         action) printf '%s' "SmokePlayModeTests.ExecutesAtLeastOneGameplayActionForBotSupportedGames" ;;
+        human) printf '%s' "SmokePlayModeTests.ExecutesHumanTurnThroughUIForSupportedGames" ;;
         systems) printf '%s' "SmokePlayModeTests.LoadsAvatarAndPurchaseSystems" ;;
         finish) printf '%s' "SmokePlayModeTests.AutofinishesBotMatchesForRequestedGames" ;;
         progression) printf '%s' "SmokePlayModeTests.RunsProgressionContractsForConfiguredBotGames" ;;
@@ -184,7 +191,7 @@ filter_for_phase() {
 
 case "$PHASE" in
     ""|all) ;;
-    safety|load|start|lifecycle|cleanup|action|systems|finish|progression|performance)
+    safety|load|start|lifecycle|cleanup|action|human|systems|finish|progression|performance)
         FILTER="$(filter_for_phase "$PHASE")"
         ;;
     *) log_error "Unknown smoke phase: $PHASE"; exit 1 ;;
@@ -205,6 +212,7 @@ case "$FILTER" in
     SmokePlayModeTests.DuplicateGameStartedKeepsTheActiveSession|\
     SmokePlayModeTests.ReturnsToLobbyAfterStartedGames|\
     SmokePlayModeTests.ExecutesAtLeastOneGameplayActionForBotSupportedGames|\
+    SmokePlayModeTests.ExecutesHumanTurnThroughUIForSupportedGames|\
     SmokePlayModeTests.RunsProgressionContractsForConfiguredBotGames|\
     SmokePlayModeTests.MeasuresRuntimePerformanceForConfiguredGames)
         ISOLATE_BY_GAME="true"
@@ -241,6 +249,11 @@ fi
 
 if [ -n "$CASE_TIMEOUT_SECONDS" ] && { ! [[ "$CASE_TIMEOUT_SECONDS" =~ ^[0-9]+$ ]] || [ "$CASE_TIMEOUT_SECONDS" -le 0 ]; }; then
     log_error "Invalid --case-timeout: $CASE_TIMEOUT_SECONDS. Use a positive integer."
+    exit 1
+fi
+
+if [ -n "$SMOKE_PLAYER_COUNT" ] && { ! [[ "$SMOKE_PLAYER_COUNT" =~ ^[0-9]+$ ]] || [ "$SMOKE_PLAYER_COUNT" -le 0 ]; }; then
+    log_error "Invalid --player-count: $SMOKE_PLAYER_COUNT. Use a positive integer."
     exit 1
 fi
 
@@ -572,6 +585,10 @@ run_single_smoke_invocation() {
         command+=( -smokeLimit "$smoke_limit" )
     fi
 
+    if [ -n "$SMOKE_PLAYER_COUNT" ]; then
+        command+=( -smokePlayerCount "$SMOKE_PLAYER_COUNT" )
+    fi
+
     if [ "$PHONE_ONLY" = "true" ]; then
         command+=( -smokePhoneOnly true )
     fi
@@ -630,6 +647,9 @@ run_single_smoke_invocation() {
     fi
     if [ -n "$smoke_limit" ]; then
         log "Smoke Limit: $smoke_limit"
+    fi
+    if [ -n "$SMOKE_PLAYER_COUNT" ]; then
+        log "Smoke Player Count Override: $SMOKE_PLAYER_COUNT"
     fi
     if [ "$PHONE_ONLY" = "true" ]; then
         log "Smoke Mode: phone-only"

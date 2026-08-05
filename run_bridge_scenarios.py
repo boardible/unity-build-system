@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 import argparse
+import base64
+import html
 import json
 import shutil
 import sys
@@ -68,6 +70,26 @@ def build_parser() -> argparse.ArgumentParser:
     start_local_parser.add_argument("--player-count", type=int, default=None)
     start_local_parser.add_argument("--teams", default=None, help="Comma-separated team sizes")
     start_local_parser.add_argument("--open-builder", action="store_true")
+
+    walkthrough_parser = subparsers.add_parser(
+        "walkthrough",
+        help="Start a local match and capture a reviewable series of screenshots as it plays",
+    )
+    walkthrough_parser.add_argument("game_id")
+    walkthrough_parser.add_argument("--player-count", type=int, default=None)
+    walkthrough_parser.add_argument("--teams", default=None, help="Comma-separated team sizes")
+    walkthrough_parser.add_argument("--frames", type=int, default=6, help="In-match frames to capture (default 6)")
+    walkthrough_parser.add_argument("--interval", type=float, default=3.0, help="Seconds between frames (default 3)")
+    walkthrough_parser.add_argument(
+        "--pause-at",
+        default=None,
+        help="Stop after this checkpoint and leave Play Mode running so the Editor can be inspected by hand",
+    )
+    walkthrough_parser.add_argument(
+        "--report",
+        default=None,
+        help="Write a self-contained HTML contact sheet of the checkpoints to this path",
+    )
 
     return parser
 
@@ -299,7 +321,15 @@ class BridgeScenarioRunner:
                 and not last_status.get("isPlayingOrWillChangePlaymode", False)
                 and now - last_enter_attempt_at >= max(self.poll_interval, 1.0)
             ):
-                self.enter_play_mode()
+                # Entering Play Mode runs the whole boot sequence and regularly outlives both the
+                # client timeout and the bridge's own 90s processing cap, reporting a failure for a
+                # command that in fact took effect. This polling loop already is the recovery
+                # mechanism, and its deadline is the real gate — so a failed attempt must not abort
+                # it. Retrying is safe: the guard above skips while a transition is in flight.
+                try:
+                    self.enter_play_mode()
+                except (TimeoutError, RuntimeError) as error:
+                    print(f"enter_play_mode did not confirm ({error}); still polling for Play Mode.", file=sys.stderr)
                 last_enter_attempt_at = now
 
             time.sleep(self.poll_interval)
@@ -667,6 +697,196 @@ class BridgeScenarioRunner:
         }
 
 
+    def checkpoint(self, name: str, description: str, known_markers) -> dict:
+        """Capture one reviewable moment: what the screen looked like, what the game thought its state
+        was, and anything that blew up getting here.
+
+        Screenshot first — the gameplay/exception queries are several round trips and the match keeps
+        running underneath, so querying first would describe a frame that is already gone."""
+        shot = self.screenshot(f"walkthrough-{name}.png")
+        snapshot = self.gameplay_snapshot()
+        exceptions = self.safe_collect_exception_evidence(known_markers=known_markers)
+
+        # `gameController` is present but explicitly null before a match exists, and dict.get's default
+        # only applies to a missing key — so this has to coalesce the value, not the lookup.
+        controller = ((snapshot or {}).get("gameController") if isinstance(snapshot, dict) else None) or {}
+        return {
+            "checkpoint": name,
+            "description": description,
+            "screenshot": shot.get("path"),
+            "screenshotSkipped": bool(shot.get("skipped")),
+            "gameId": controller.get("gameId"),
+            "phase": controller.get("phase") or controller.get("state"),
+            "turn": controller.get("turn"),
+            "exceptions": exceptions,
+        }
+
+    def run_walkthrough(
+        self,
+        game_id: str,
+        player_count: int | None,
+        teams: str | None,
+        frames: int,
+        interval: float,
+        pause_at: str | None,
+        report_path: str | None,
+    ) -> dict:
+        heartbeat = self.heartbeat(
+            self.capabilities_for(
+                "get_status",
+                "get_gameplay_snapshot",
+                "get_recent_exceptions",
+                "enter_play_mode",
+                "open_game",
+                "start_local_match",
+                "capture_screenshot",
+                "execute_menu_item",
+            )
+        )
+        known_markers = self.safe_exception_markers()
+        checkpoints: list[dict] = []
+        paused = False
+
+        def stop_here(name: str) -> bool:
+            return pause_at is not None and pause_at == name
+
+        self.ensure_runtime_ready()
+
+        # ensure_runtime_ready settles for `isPlaying` plus an AppRoom instance, which the app reaches
+        # well before it is usable: the connection is still coming up, AppRoom.gameSetup is still null,
+        # and start_local_match then dies on a NullReferenceException at AppRoom.HandleChangeGame.
+        # This app is not offline-first, so the connection is a hard precondition, not a nicety.
+        status = self.wait_for_status_with_timeout(
+            lambda snapshot: bool(snapshot.get("objects", {}).get("appCoreConnection")),
+            "app connection to finish booting",
+            timeout_seconds=min(self.wait_timeout, 180.0),
+        )
+        if status is None:
+            # Almost always means Play Mode was entered with no scene loaded, so nothing booted at all.
+            # Say that instead of burning the full budget on checkpoints of an empty skybox.
+            raise ScenarioFailure(
+                "The app never finished booting (objects.appCoreConnection stayed false). Check that "
+                f"the boot scene is open in the Editor before running this — activeScene must not be "
+                "empty. Assets/App/Scenes/GameBoxScene.unity is the only scene in Build Settings."
+            )
+
+        checkpoints.append(self.checkpoint("boot", "Runtime ready, before the game is opened", known_markers))
+        if stop_here("boot"):
+            paused = True
+        else:
+            args = {"gameId": game_id, "openBuilder": False}
+            if player_count is not None:
+                args["playerCount"] = player_count
+            if teams:
+                args["teamsCount"] = [int(part.strip()) for part in teams.split(",") if part.strip()]
+
+            self.request("start_local_match", args, timeout=max(self.timeout, 60.0))
+            self.wait_for_status(
+                lambda snapshot: snapshot.get("gameController", {}).get("gameId") == game_id,
+                f"local match '{game_id}' to start",
+            )
+            checkpoints.append(self.checkpoint("match-start", "Match started, first rendered frame", known_markers))
+
+            if not stop_here("match-start"):
+                for index in range(1, max(frames, 0) + 1):
+                    time.sleep(interval)
+                    name = f"turn-{index:02d}"
+                    checkpoints.append(
+                        self.checkpoint(name, f"{index * interval:.0f}s into the match", known_markers)
+                    )
+                    if stop_here(name):
+                        paused = True
+                        break
+            else:
+                paused = True
+
+        # Every checkpoint reports exceptions cumulatively against the same baseline, so the run-level
+        # verdict is just the last one — no need to union them.
+        final_exceptions = checkpoints[-1]["exceptions"] if checkpoints else {}
+        captured = [c for c in checkpoints if c.get("screenshot") and not c.get("screenshotSkipped")]
+
+        result = {
+            "scenario": "walkthrough",
+            "gameId": game_id,
+            "heartbeat": heartbeat,
+            "checkpoints": checkpoints,
+            "capturedScreenshots": len(captured),
+            "paused": paused,
+            "pausedAt": pause_at if paused else None,
+            "exceptions": final_exceptions,
+        }
+
+        if report_path:
+            result["report"] = write_walkthrough_report(Path(report_path), result)
+
+        return result
+
+
+def write_walkthrough_report(path: Path, result: dict) -> str:
+    """Emit a self-contained HTML contact sheet.
+
+    Images are inlined as data URIs rather than linked: the report gets read from run folders that are
+    pruned on a schedule, and a report whose images 404 a week later is worse than no report."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    cards = []
+    for entry in result.get("checkpoints", []):
+        shot = entry.get("screenshot")
+        img = '<div class="missing">no screenshot</div>'
+        if shot and Path(shot).is_file():
+            encoded = base64.b64encode(Path(shot).read_bytes()).decode("ascii")
+            img = f'<img loading="lazy" alt="{html.escape(entry["checkpoint"])}" src="data:image/png;base64,{encoded}">'
+
+        exceptions = entry.get("exceptions") or {}
+        new_exceptions = exceptions.get("new") or exceptions.get("newExceptions") or []
+        badge = (
+            f'<span class="bad">{len(new_exceptions)} new exception(s)</span>'
+            if new_exceptions
+            else '<span class="ok">clean</span>'
+        )
+        meta = " · ".join(
+            str(v) for v in (entry.get("phase"), f"turn {entry['turn']}" if entry.get("turn") is not None else None) if v
+        )
+        cards.append(
+            f'<figure><figcaption><b>{html.escape(entry["checkpoint"])}</b> {badge}'
+            f'<span class="desc">{html.escape(entry.get("description") or "")}</span>'
+            f'{f"<span class=meta>{html.escape(meta)}</span>" if meta else ""}'
+            f"</figcaption>{img}</figure>"
+        )
+
+    title = f"Walkthrough — {result.get('gameId', 'game')}"
+    document = f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{html.escape(title)}</title>
+<style>
+  :root {{ color-scheme: light dark; --bg:#faf9f7; --fg:#1b1a18; --line:#d8d4cd; --muted:#6c6862; }}
+  @media (prefers-color-scheme: dark) {{ :root {{ --bg:#16161a; --fg:#ecebe8; --line:#33323a; --muted:#9a968f; }} }}
+  body {{ margin:0; padding:2rem; background:var(--bg); color:var(--fg);
+         font:16px/1.5 ui-sans-serif,system-ui,-apple-system,sans-serif; }}
+  h1 {{ font-size:1.4rem; margin:0 0 .25rem; }}
+  .sub {{ color:var(--muted); margin-bottom:2rem; }}
+  .grid {{ display:grid; gap:1.5rem; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); }}
+  figure {{ margin:0; border:1px solid var(--line); border-radius:10px; overflow:hidden; background:transparent; }}
+  figcaption {{ padding:.65rem .8rem; border-bottom:1px solid var(--line); display:flex;
+                flex-wrap:wrap; gap:.5rem; align-items:baseline; font-size:.85rem; }}
+  .desc, .meta {{ color:var(--muted); }}
+  .meta {{ font-variant-numeric:tabular-nums; }}
+  img {{ display:block; width:100%; height:auto; }}
+  .missing {{ padding:3rem 1rem; text-align:center; color:var(--muted); }}
+  .ok {{ color:#2f7d4f; }} .bad {{ color:#b3261e; font-weight:600; }}
+  @media (prefers-color-scheme: dark) {{ .ok {{ color:#7bd8a0; }} .bad {{ color:#ff8a80; }} }}
+</style></head><body>
+<h1>{html.escape(title)}</h1>
+<div class="sub">{len(result.get('checkpoints', []))} checkpoint(s) ·
+{result.get('capturedScreenshots', 0)} screenshot(s){' · paused at ' + html.escape(str(result.get('pausedAt'))) if result.get('paused') else ''}</div>
+<div class="grid">{''.join(cards)}</div>
+</body></html>
+"""
+    path.write_text(document, encoding="utf-8")
+    return str(path)
+
+
 def main() -> int:
     parser = build_parser()
     parsed = parser.parse_args()
@@ -697,8 +917,39 @@ def main() -> int:
             result = runner.run_open_game(parsed.game_id, parsed.target)
         elif parsed.scenario == "start-local":
             result = runner.run_start_local(parsed.game_id, parsed.player_count, parsed.teams, parsed.open_builder)
+        elif parsed.scenario == "walkthrough":
+            result = runner.run_walkthrough(
+                parsed.game_id,
+                parsed.player_count,
+                parsed.teams,
+                parsed.frames,
+                parsed.interval,
+                parsed.pause_at,
+                parsed.report,
+            )
         else:
             raise ScenarioFailure(f"Unsupported scenario: {parsed.scenario}")
+    except TimeoutError as error:
+        # A slow Editor is an ordinary outcome here, not a crash. It used to surface as a raw
+        # traceback, which buries the one thing worth knowing: whether the command actually took
+        # effect. Entering Play Mode on this project regularly outlives the default 30s timeout while
+        # succeeding, so say that rather than implying the bridge is down.
+        message = (
+            f"Bridge request timed out: {error}. The Editor may still be busy — check "
+            ".utmp/unity-control-bridge/bridge.json ('isPlaying', 'isCompiling', "
+            "'pendingProcessingCount'); if the command took effect anyway, re-run with a larger "
+            "--timeout rather than assuming the bridge is down."
+        )
+        if parsed.output:
+            output_path = Path(parsed.output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(json.dumps({
+                "scenario": parsed.scenario,
+                "status": "timeout",
+                "error": message,
+            }, indent=2) + "\n", encoding="utf-8")
+        print(message, file=sys.stderr)
+        return 1
     except ScenarioFailure as error:
         if parsed.output:
             output_path = Path(parsed.output)

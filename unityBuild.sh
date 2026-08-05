@@ -482,6 +482,54 @@ build_addressables() {
     fi
 }
 
+# Runs the Addressables content build and the player build as two separate Unity sessions.
+#
+# They must not share one session. The Addressables content build compiles player scripts in-process,
+# and because batchmode runs with Auto Refresh disabled, Unity escalates that into a full recompile of
+# every assembly, editor ones included. That leaves a domain reload queued which nothing in a headless
+# session ever services, so the player build that follows refuses outright with
+# "Error building Player: A domain reload is pending." — surfaced uselessly upstream as
+# "build failed: Unknown". A fresh process starts with no queued reload, so BuildPlayer gets to run
+# its own recompile pass, which is exactly what it does on a healthy build.
+#
+# Both routes call the same BuildAddressablesInternal(), so splitting them changes nothing about the
+# content produced: same "Default" Addressables profile, same Application.version stamped into it.
+build_addressables_then_player() {
+    local platform=$1
+    local build_target=$2
+    local output_path=$3
+    local profile=$4
+    local additional_args=$5
+
+    # An explicit skip from the caller (fast dev cycle) is honoured rather than overridden.
+    case "${UNITY_SKIP_ADDRESSABLES:-}" in
+        1|true|TRUE|True|yes|YES|Yes)
+            log "UNITY_SKIP_ADDRESSABLES is set — skipping the Addressables session entirely"
+            ;;
+        *)
+            build_addressables "$platform"
+            ;;
+    esac
+
+    # Remember the caller's value so building "both" platforms does not leak the skip from the first
+    # platform into the second one, which would silently ship it with stale Addressables content.
+    local had_skip="false"
+    local previous_skip=""
+    if [ -n "${UNITY_SKIP_ADDRESSABLES+x}" ]; then
+        had_skip="true"
+        previous_skip="$UNITY_SKIP_ADDRESSABLES"
+    fi
+
+    export UNITY_SKIP_ADDRESSABLES=1
+    build_unity "$platform" "$build_target" "$output_path" "$profile" "$additional_args"
+
+    if [ "$had_skip" = "true" ]; then
+        export UNITY_SKIP_ADDRESSABLES="$previous_skip"
+    else
+        unset UNITY_SKIP_ADDRESSABLES
+    fi
+}
+
 # Check if BoardDoctor should be run
 check_boarddoctor() {
     local platform=$1
@@ -640,8 +688,8 @@ build_ios() {
     
     local ios_build_path="$BUILD_PATH/iOS"
     
-    # Build Unity iOS project (Addressables + Build in single session)
-    build_unity "iOS" "iOS" "$ios_build_path" "$PROFILE"
+    # Addressables and the player build run as two Unity sessions — see build_addressables_then_player.
+    build_addressables_then_player "iOS" "iOS" "$ios_build_path" "$PROFILE" ""
     
     log "iOS Unity build completed. Xcode project available at: $ios_build_path"
 
@@ -701,8 +749,8 @@ build_android() {
         log "Copied google-services.json to Assets/ for Firebase Gradle plugin"
     fi
 
-    # Build Unity Android project (now includes BoardDoctor + Addressables + Build in single session)
-    build_unity "Android" "Android" "$android_build_path/app.aab" "$PROFILE" ""
+    # Addressables and the player build run as two Unity sessions — see build_addressables_then_player.
+    build_addressables_then_player "Android" "Android" "$android_build_path/app.aab" "$PROFILE" ""
     
     log "Android Unity build completed. AAB file available at: $android_build_path/app.aab"
     
