@@ -34,3 +34,10 @@ export CLOUDFRONT_DOMAIN="csv.yourcompany.com"
 export REMOTE_ADDRESSABLES_ENABLED="false"
 export ADDRESSABLES_S3_PATH="s3://your-cdn-bucket/addressables_test"    # Required when enabled
 export ADDRESSABLES_CLOUDFRONT_DISTRIBUTION_ID=""                       # Set via environment or CI secrets
+
+# Boot Scene (used by ./Scripts/dev-check.sh probe)
+# The scene that must be open in the Editor for the app to boot. Play Mode on any other
+# scene renders an empty skybox and nothing initialises. Paths differ per project, so this
+# cannot be defaulted in shared Scripts/ code. When unset, the probe falls back to the first
+# scene in ProjectSettings/EditorBuildSettings.asset.
+export UNITY_BOOT_SCENE="Assets/App/Scenes/GameBoxScene.unity"
