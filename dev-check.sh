@@ -21,6 +21,7 @@ Usage:
   ./Scripts/dev-check.sh visual <game-id> [smoke options]
   ./Scripts/dev-check.sh walkthrough <game-id> [--frames N] [--interval S] [--pause-at NAME]
   ./Scripts/dev-check.sh probe <game-id> [--frames N] [--interval S] [--presenter-query Q]
+  ./Scripts/dev-check.sh debug-player [--output <dir>]
   ./Scripts/dev-check.sh triage <game-id> [bridge scenario options]
   ./Scripts/dev-check.sh full [smoke options]
 
@@ -33,6 +34,9 @@ Profiles:
   walkthrough  Play a match in an open Editor, screenshotting each checkpoint into an HTML sheet.
   probe    Like walkthrough, but the report carries the frames inline for an agent to read
            directly instead of an HTML sheet a human has to open. Needs the Unity CLI.
+  debug-player  Build a macOS development Player that the Unity CLI can drive (muted, agent
+           capture enabled). WARNING: switching to StandaloneOSX reimports every asset, and
+           switching back for an iOS/Android build reimports again.
   triage   Reuse an open Unity Editor through the bridge; no Unity restart.
   full     Full aggregate smoke; continues to collect all failures by default.
 
@@ -199,6 +203,32 @@ case "$profile" in
         exit_code=$?
         set -e
         log "Report: $run_root/probe.json"
+        exit "$exit_code"
+        ;;
+    debug-player)
+        if ! command -v unity >/dev/null 2>&1; then
+            log_error "The 'unity' CLI is not on PATH. Install it with 'brew update && brew install --cask unity-cli'."
+            exit 1
+        fi
+        if pgrep -af "Unity.app/Contents/MacOS/Unity" | grep -q -- "-projectPath $PROJECT_PATH"; then
+            log_error "The project is open in Unity. Close the Editor first — this build runs in batchmode."
+            exit 1
+        fi
+        output="${2:-$PROJECT_PATH/Builds/DebugPlayer}"
+        log "Building a macOS development Player. The first StandaloneOSX switch reimports every asset."
+        set +e
+        unity build "$PROJECT_PATH" \
+            --target StandaloneOSX \
+            --execute-method BuildDebugPlayer.BuildOSX \
+            --output-path "$output" \
+            --log-file "$run_root/build.log"
+        exit_code=$?
+        set -e
+        log "Log: $run_root/build.log"
+        if [ "$exit_code" -eq 0 ]; then
+            log "Player: $output/BoardibleDebug.app"
+            log "Run it, then attach with: unity command --runtime BoardibleDebug runtime_status"
+        fi
         exit "$exit_code"
         ;;
     triage)
