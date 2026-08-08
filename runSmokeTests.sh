@@ -762,10 +762,31 @@ if not manifest_path.is_file():
     raise SystemExit(f"Fail-closed smoke manifest not found: {manifest_path}")
 
 text = manifest_path.read_text(encoding="utf-8", errors="strict")
-declaration = re.compile(
-    r"(?:GraphBot|GraphScripted|GraphMissing|CodeBot|CodeMissing)\(\"([^\"]+)\"\)"
+
+# Discover the factory helpers from the manifest itself instead of hardcoding them.
+# A hardcoded list silently drops every game declared with a helper nobody remembered
+# to add here: CodeScripted was missing until 2026-08-06 and 7 of 23 games had never
+# run in the isolated lane. The manifest is fail-closed; so is its shell reader now.
+factories = set(
+    re.findall(r"private static SmokeGameManifestEntry (\w+)\(string gameId\)", text)
 )
-game_ids = declaration.findall(text)
+if not factories:
+    raise SystemExit(f"No entry factories found in smoke manifest: {manifest_path}")
+
+entries_block = re.search(
+    r"EntriesInternal\s*=\s*\{(.*?)\n\s*\};", text, re.DOTALL
+)
+if entries_block is None:
+    raise SystemExit(f"Could not locate EntriesInternal in smoke manifest: {manifest_path}")
+
+declarations = re.findall(r"(\w+)\(\"([^\"]+)\"\)", entries_block.group(1))
+unknown = sorted({name for name, _ in declarations} - factories)
+if unknown:
+    raise SystemExit(
+        f"Unknown smoke manifest entry factory {unknown} in {manifest_path}"
+    )
+
+game_ids = [game_id for _, game_id in declarations]
 if not game_ids:
     raise SystemExit(f"No games declared in fail-closed smoke manifest: {manifest_path}")
 if len(game_ids) != len(set(game_id.casefold() for game_id in game_ids)):

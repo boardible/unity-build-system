@@ -22,6 +22,7 @@ Usage:
   ./Scripts/dev-check.sh walkthrough <game-id> [--frames N] [--interval S] [--pause-at NAME]
   ./Scripts/dev-check.sh probe <game-id> [--frames N] [--interval S] [--presenter-query Q]
   ./Scripts/dev-check.sh debug-player [--output <dir>]
+  ./Scripts/dev-check.sh player-probe <game-id> [--frames N] [--interval S] [--keep-player]
   ./Scripts/dev-check.sh triage <game-id> [bridge scenario options]
   ./Scripts/dev-check.sh full [smoke options]
 
@@ -37,6 +38,11 @@ Profiles:
   debug-player  Build a macOS development Player that the Unity CLI can drive (muted, agent
            capture enabled). WARNING: switching to StandaloneOSX reimports every asset, and
            switching back for an iOS/Android build reimports again.
+  player-probe  Bring the Player built above to a running match of one game and capture frames.
+           Needs no Editor and no loaded scene, so it costs a fraction of the Editor's memory.
+           Animations play at full speed here on purpose: GamePacing only collapses presentation
+           waits when there is no graphics device, and a Player has one. It does not play the
+           match out — smoke already owns the rules; this lane owns "does it look right".
   triage   Reuse an open Unity Editor through the bridge; no Unity restart.
   full     Full aggregate smoke; continues to collect all failures by default.
 
@@ -229,6 +235,28 @@ case "$profile" in
             log "Player: $output/BoardibleDebug.app"
             log "Run it, then attach with: unity command --runtime BoardibleDebug runtime_status"
         fi
+        exit "$exit_code"
+        ;;
+    player-probe)
+        require_game "${1:-}"
+        game_id="$1"
+        shift
+        if ! command -v unity >/dev/null 2>&1; then
+            log_error "The 'unity' CLI is not on PATH. Install it with 'brew update && brew install --cask unity-cli'."
+            exit 1
+        fi
+        # No Editor requirement and no scene to load: the Player boots the app itself. Animations run
+        # at full speed here — GamePacing only collapses them when there is no graphics device — so
+        # what gets captured is what a player would see.
+        set +e
+        python3 "$SCRIPT_DIR/probe_player_visuals.py" "$game_id" \
+            --project "$PROJECT_PATH" \
+            --output-dir "$run_root/frames" \
+            --output "$run_root/player-probe.json" "$@"
+        exit_code=$?
+        set -e
+        log "Report: $run_root/player-probe.json"
+        log "Frames: $run_root/frames"
         exit "$exit_code"
         ;;
     triage)

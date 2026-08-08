@@ -139,11 +139,19 @@ class Pipeline:
         timeout: int = DEFAULT_TIMEOUT,
         reload_grace: float = DEFAULT_RELOAD_GRACE,
         poll_interval: float = 3.0,
+        runtime: str | None = None,
+        runtime_path: str | None = None,
     ) -> None:
         self.project = project
         self.timeout = timeout
         self.reload_grace = reload_grace
         self.poll_interval = poll_interval
+        # Target a running Player instead of the Editor. `runtime` searches by process name,
+        # `runtime_path` points at the Player's port descriptor file — the reliable one when
+        # several Players of the same project could be up. The Editor remains the default because
+        # it is the only side with the control bridge's ~20 domain commands.
+        self.runtime = runtime
+        self.runtime_path = runtime_path
         self._schemas: dict[str, set[str]] | None = None
         if shutil.which("unity") is None:
             raise PipelineError(
@@ -166,7 +174,7 @@ class Pipeline:
             return self._schemas
         try:
             completed = subprocess.run(
-                ["unity", "list", "--project-path", str(self.project), "--format", "json"],
+                ["unity", "list", *self._target_args(), "--format", "json"],
                 capture_output=True,
                 text=True,
                 timeout=60,
@@ -190,13 +198,25 @@ class Pipeline:
             self._schemas = {}
         return self._schemas
 
+    def _target_args(self) -> list[str]:
+        """Which Unity this talks to: the project's Editor, or a running Player.
+
+        The flags are mutually exclusive on the CLI side, and `--runtime-path` wins when both are
+        given because it names one specific Player rather than matching a process name — with two
+        Players of the same build up, name matching is a coin flip.
+        """
+        if self.runtime_path:
+            return ["--runtime-path", str(self.runtime_path)]
+        if self.runtime:
+            return ["--runtime", str(self.runtime)]
+        return ["--project-path", str(self.project)]
+
     def _invoke(self, tool: str, params: dict) -> tuple[int, str, str]:
         command = [
             "unity",
             "command",
             tool,
-            "--project-path",
-            str(self.project),
+            *self._target_args(),
             "--timeout",
             str(self.timeout),
         ]
@@ -400,6 +420,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Project path or sibling project name. Defaults to the project this script lives in.",
     )
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT)
+    parser.add_argument(
+        "--runtime",
+        help="Talk to a running Player instead of the Editor, matched by process name.",
+    )
+    parser.add_argument(
+        "--runtime-path",
+        help="Talk to a running Player identified by its port descriptor file. Beats --runtime.",
+    )
     parser.add_argument("--reload-grace", type=float, default=DEFAULT_RELOAD_GRACE)
     parser.add_argument("--json", action="store_true", help="Print the raw JSON result.")
 
@@ -463,13 +491,19 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     project = resolve_project_path(args.project)
-    pipeline = Pipeline(project, timeout=args.timeout, reload_grace=args.reload_grace)
+    pipeline = Pipeline(
+        project,
+        timeout=args.timeout,
+        reload_grace=args.reload_grace,
+        runtime=args.runtime,
+        runtime_path=args.runtime_path,
+    )
 
     try:
         if args.command == "status":
             result = pipeline.editor_status()
         elif args.command == "tools":
-            result = _list_tools(project)
+            result = _list_tools(pipeline)
         elif args.command == "screenshot":
             result = pipeline.screenshot(args.output, view=args.view)
         elif args.command == "fields":
@@ -498,9 +532,9 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _list_tools(project: Path) -> dict:
+def _list_tools(pipeline: "Pipeline") -> dict:
     completed = subprocess.run(
-        ["unity", "list", "--project-path", str(project), "--format", "json"],
+        ["unity", "list", *pipeline._target_args(), "--format", "json"],
         capture_output=True,
         text=True,
         timeout=60,
